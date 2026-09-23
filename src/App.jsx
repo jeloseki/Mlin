@@ -211,6 +211,39 @@ const playAudioEffect = (type, soundEnabled = true) => {
       gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
       osc.start(); osc.stop(now + 0.12);
     }
+    else if (type === 'victory') {
+      // Pobjednička fanfara: 4 uzlazna tona (C5, E5, G5, C6)
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.12);
+        const duration = idx === notes.length - 1 ? 0.35 : 0.11;
+        gain.gain.setValueAtTime(0.25, now + idx * 0.12);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + duration);
+        osc.start(now + idx * 0.12);
+        osc.stop(now + idx * 0.12 + duration);
+      });
+    } else if (type === 'defeat') {
+      // Zvuk poraza: padajući tonovi s klizanjem naniže
+      const tones = [440, 370, 280];
+      tones.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.18);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.85, now + idx * 0.18 + 0.17);
+        gain.gain.setValueAtTime(0.2, now + idx * 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.18 + 0.17);
+        osc.start(now + idx * 0.18);
+        osc.stop(now + idx * 0.18 + 0.17);
+      });
+    }
   } catch (e) { }
 };
 
@@ -361,26 +394,47 @@ export default function App() {
     setTimeout(() => {
       playAudioEffect('coinLand', soundEnabled);
       setIsFlipping(false);
+      const isWinnerP1 = choice === (isHeads ? 'heads' : 'tails');
+      const winnerId = isWinnerP1 ? 1 : 2;
+
       setCoinResultText(isHeads ? t.heads : t.tails);
-      setCoinWinner(choice === (isHeads ? 'heads' : 'tails') ? 1 : 2);
-      setSetupStep('COLOR_SELECT');
+      setCoinWinner(winnerId);
+
+      // AKO IGRAŠ PROTIV AI I AI POBIJEDI NA NOVČIĆU (Igrač 2):
+      if (isAIMode && winnerId === 2) {
+        // AI automatski bira bijele i igra prvi
+        setPlayers({
+          WHITE: { name: p2Name, id: 2 },
+          BLACK: { name: p1Name, id: 1 }
+        });
+        setAiColor('WHITE');
+        setTurn('WHITE');
+        setSetupStep('PLAY');
+      } else {
+        // Inače čovjek bira boju
+        setSetupStep('COLOR_SELECT');
+      }
     }, 2500);
   };
 
   const handleColorSelect = (color) => {
-    const winnerName = coinWinner === 1 ? p1Name : p2Name;
-    const loserName = coinWinner === 1 ? p2Name : p1Name;
-
-    const whitePlayer = color === 'WHITE' ? winnerName : loserName;
-    const blackPlayer = color === 'WHITE' ? loserName : winnerName;
+    // Ako čovjek bira boju (coinWinner === 1):
+    const p1ChosenColor = color; // 'WHITE' ili 'BLACK'
+    const p2ChosenColor = p1ChosenColor === 'WHITE' ? 'BLACK' : 'WHITE';
 
     setPlayers({
-      WHITE: { name: whitePlayer, id: color === 'WHITE' ? coinWinner : (coinWinner === 1 ? 2 : 1) },
-      BLACK: { name: blackPlayer, id: color === 'BLACK' ? coinWinner : (coinWinner === 1 ? 2 : 1) }
+      WHITE: {
+        name: p1ChosenColor === 'WHITE' ? p1Name : p2Name,
+        id: p1ChosenColor === 'WHITE' ? 1 : 2
+      },
+      BLACK: {
+        name: p1ChosenColor === 'BLACK' ? p1Name : p2Name,
+        id: p1ChosenColor === 'BLACK' ? 1 : 2
+      }
     });
 
     if (isAIMode) {
-      setAiColor(color === 'WHITE' ? 'BLACK' : 'WHITE');
+      setAiColor(p2ChosenColor);
     }
 
     setTurn('WHITE');
@@ -393,6 +447,15 @@ export default function App() {
     setWinner(winningColor);
 
     const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
+
+    // Ako igrač igra protiv AI-ja ili lokalno, okini odgovarajući zvuk:
+    if (userColor) {
+      const isUserWinner = winningColor === userColor;
+      playAudioEffect(isUserWinner ? 'victory' : 'defeat', soundEnabled);
+    } else {
+      playAudioEffect('victory', soundEnabled);
+    }
+
     if (!userColor) return;
 
     const isUserWinner = winningColor === userColor;

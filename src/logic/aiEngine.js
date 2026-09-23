@@ -143,22 +143,26 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
   if (emptyNodes.length === 0) return null;
   const oppColor = getOpponent(aiColor);
 
-  // 1. ZATVORI VLASTITI MLIN (Sve težine)
+  // 1. ZATVORI VLASTITI MLIN (Apsolutni prioritet za pobjednički potez)
   for (let node of emptyNodes) {
-    if (checkFormsMill(board, node, aiColor)) {
+    const simBoard = [...board];
+    simBoard[node] = aiColor;
+    if (checkFormsMill(simBoard, node, aiColor)) {
       return node;
     }
   }
 
-  // 2. BLOKIRAJ PROTIVNIČKI MLIN (Sve težine)
+  // 2. BLOKIRAJ PROTIVNIČKI MLIN (Ako protivnik ima 2 u nizu, AI MORA stati na 3. mjesto)
   for (let node of emptyNodes) {
-    if (checkFormsMill(board, node, oppColor)) {
+    const simBoard = [...board];
+    simBoard[node] = oppColor;
+    if (checkFormsMill(simBoard, node, oppColor)) {
       return node;
     }
   }
 
   if (difficulty === 'EASY') {
-    // Lako: preferira polja koja stvaraju 2-u-nizu
+    // Lako: traži polja koja stvaraju 2-u-nizu
     for (let node of emptyNodes) {
       const tempBoard = [...board];
       tempBoard[node] = aiColor;
@@ -169,7 +173,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
     return emptyNodes[Math.floor(Math.random() * emptyNodes.length)];
   }
 
-  // Srednje i Teško: evaluacija najboljeg strateškog polja
+  // Srednje i Teško: strateško biranje najboljeg polja
   let bestScore = -Infinity;
   let bestNode = emptyNodes[0];
 
@@ -181,27 +185,29 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
 
     // Stvaranje vlastitih dvojki
     const myPotentials = countPotentialMills(tempBoard, aiColor);
-    score += myPotentials * 40;
+    score += myPotentials * 45;
 
-    // Blokiranje protivničkih potencijala
+    // Blokiranje protivničkih potencijala (dvojki)
     const oppPotentialsBefore = countPotentialMills(board, oppColor);
     const oppPotentialsAfter = countPotentialMills(tempBoard, oppColor);
-    score += (oppPotentialsBefore - oppPotentialsAfter) * 30;
+    score += (oppPotentialsBefore - oppPotentialsAfter) * 35;
 
-    // Kontrola raskrižja (polja s 4 veze)
+    // Kontrola raskrižja (polja s 4 veze: križevi)
     const connections = (BOARD_CONNECTIONS[node] || []).length;
-    score += connections * 10;
+    score += connections * 12;
 
-    // Slobodna susjedna polja za kasniju pokretljivost
+    // Slobodna susjedna polja
     const freeNeighbors = (BOARD_CONNECTIONS[node] || []).filter((i) => board[i] === null).length;
     score += freeNeighbors * 8;
 
     if (difficulty === 'HARD') {
-      // Teško: predviđanje jednog odgovora protivnika
+      // Izbjegavaj potez koji protivniku direktno otvara mlin u idućem koraku
       for (let oppNode of emptyNodes) {
         if (oppNode === node) continue;
-        if (checkFormsMill(tempBoard, oppNode, oppColor)) {
-          score -= 60; // Izbjegava potez koji protivniku ostavlja slobodan mlin
+        const testBoard = [...tempBoard];
+        testBoard[oppNode] = oppColor;
+        if (checkFormsMill(testBoard, oppNode, oppColor)) {
+          score -= 50;
         }
       }
     }
