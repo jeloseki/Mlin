@@ -31,7 +31,6 @@ export default function Board({
   const isAITurn = isAIMode && turn === aiColor;
   const boardRef = useRef(null);
 
-  // Funkcija za pronalaženje najbližeg čvora pri puštanju miša (magnetski drop)
   const findClosestNode = (clientX, clientY) => {
     if (!boardRef.current) return null;
     const rect = boardRef.current.getBoundingClientRect();
@@ -49,12 +48,11 @@ export default function Board({
       }
     });
 
-    // Povećan radijus tolerancije (16% širine ploče)
     return minDistance <= 16 ? closestNode : null;
   };
 
   const handleBoardMouseUp = (e) => {
-    if (isAITurn) return;
+    if (isAITurn || mustRemove) return;
     const closest = findClosestNode(e.clientX, e.clientY);
     if (closest !== null && onNodeInteract) {
       onNodeInteract(closest);
@@ -77,7 +75,6 @@ export default function Board({
         <line x1="50" y1="90" x2="50" y2="63.33" stroke="#d4af37" strokeWidth="2.5" />
         <line x1="10" y1="50" x2="36.66" y2="50" stroke="#d4af37" strokeWidth="2.5" />
 
-        {/* Kružići stopljeni u linije ploče */}
         {NODE_POSITIONS.map((pos, i) => (
           <circle
             key={`dot-${i}`}
@@ -108,6 +105,7 @@ export default function Board({
             style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
             onClick={(e) => {
               e.stopPropagation();
+              if (isAITurn) return;
               onNodeInteract(idx);
             }}
           >
@@ -119,9 +117,7 @@ export default function Board({
                 onMouseDown={(e) => {
                   if (isAITurn) return;
                   e.stopPropagation();
-                  if (mustRemove && isRemovable) {
-                    onNodeInteract(idx);
-                  } else if (canPickPiece) {
+                  if (canPickPiece) {
                     onNodePick(idx);
                   }
                 }}

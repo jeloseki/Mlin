@@ -93,9 +93,9 @@ const TRANSLATIONS = {
     btnNextCoin: "Dalje na Novčić",
     titleCoin: "Bacanje Novčića",
     coinPrompt: "bira stranu novčića:",
-    heads: "HEADS",
-    tails: "TAILS",
-    resultTitle: "Pao je",
+    heads: "GLAVA",
+    tails: "PISMO",
+    resultTitle: "Pala je",
     winnerIs: "Pobjednik novčića je",
     chooseColor: "Odaberite boju (Bijeli igrač uvijek igra prvi):",
     white: "Bijele",
@@ -277,6 +277,7 @@ export default function App() {
   const [isFlipping, setIsFlipping] = useState(false);
   const [coinResultText, setCoinResultText] = useState('');
   const [coinWinner, setCoinWinner] = useState(null);
+  const [captured, setCaptured] = useState({ WHITE: 0, BLACK: 0 });
 
   const [players, setPlayers] = useState({
     WHITE: { name: '', id: 1 },
@@ -291,7 +292,7 @@ export default function App() {
   const [winner, setWinner] = useState(null);
 
   // UNIVERZALNI SUSTAV NOŠENJA/POVLAČENJA (POINTER DRAG & DROP)
-  const [activeHeldPiece, setActiveHeldPiece] = useState(null); // { type: 'RACK' | 'NODE', sourceIdx: number | null, color: 'WHITE' | 'BLACK' }
+  const [activeHeldPiece, setActiveHeldPiece] = useState(null);
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
@@ -300,9 +301,8 @@ export default function App() {
       setMousePos({ x: e.clientX, y: e.clientY });
     };
 
-    const handleGlobalMouseUp = (e) => {
+    const handleGlobalMouseUp = () => {
       isMouseDownRef.current = false;
-      // Ako je igrač držao miša pritisnutim i otpustio ga iznad elementa koji nije čvor, puštanje se ignorira ili rješava u dropu
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -326,6 +326,7 @@ export default function App() {
     setP2Name('Igrač 2');
     setSetupStep('NAMES');
     setCurrentScreen('GAME');
+    setCaptured({ WHITE: 0, BLACK: 0 });
   };
 
   const startAIGame = (difficulty) => {
@@ -343,6 +344,7 @@ export default function App() {
     setP2Name(`AI (${difficulty})`);
     setSetupStep('NAMES');
     setCurrentScreen('GAME');
+    setCaptured({ WHITE: 0, BLACK: 0 });
   };
 
   const triggerCoinFlip = (choice) => {
@@ -359,7 +361,7 @@ export default function App() {
     setTimeout(() => {
       playAudioEffect('coinLand', soundEnabled);
       setIsFlipping(false);
-      setCoinResultText(isHeads ? 'HEADS' : 'TAILS');
+      setCoinResultText(isHeads ? t.heads : t.tails);
       setCoinWinner(choice === (isHeads ? 'heads' : 'tails') ? 1 : 2);
       setSetupStep('COLOR_SELECT');
     }, 2500);
@@ -437,31 +439,39 @@ export default function App() {
       const newBoard = [...board];
       newBoard[nodeIndex] = null;
       setBoard(newBoard);
+      setCaptured(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
       setMustRemove(false);
       setSelectedNode(null);
       setActiveHeldPiece(null);
 
+      // PROVJERA KRAJA IGRE
       if (unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3) {
         handleGameEnd(turn);
         return;
       }
-      setTurn(opponent);
+
+      // PREDAJA POTEZA PROTIVNIKU S BLAGOM ODGODOM (DA SE SPRIJEČI DVOSTRUKI KLIK NA ISTO POLJE)
+      setTimeout(() => {
+        setTurn(opponent);
+      }, 50);
       return;
     }
 
     // 2. FAZA POSTAVLJANJA FIGURA IZ STALKA
+    // Postavljanje važi SAMO ako ima figura u stalku I ako igrač postavlja na prazno polje
     const isPlacingFromRack = activeHeldPiece && activeHeldPiece.type === 'RACK';
     if (unplaced[turn] > 0 || isPlacingFromRack) {
-      if (board[nodeIndex] !== null) return;
+      if (board[nodeIndex] !== null) return; // Može se postaviti samo na prazan čvor
 
       playAudioEffect('place', soundEnabled);
       const newBoard = [...board];
       newBoard[nodeIndex] = turn;
       setBoard(newBoard);
-      setUnplaced({ ...unplaced, [turn]: unplaced[turn] - 1 });
+      setUnplaced(prev => ({ ...prev, [turn]: prev[turn] - 1 })); // Ovdje se troši figura iz stalka
       setActiveHeldPiece(null);
       setSelectedNode(null);
 
+      // Ako je složen mlin, aktiviramo fazu uklanjanja i ostajemo na istom igraču
       if (checkFormsMill(newBoard, nodeIndex, turn)) {
         setMustRemove(true);
       } else {
@@ -553,7 +563,7 @@ export default function App() {
   const removableNodes = mustRemove
     ? (opponentNotInMill.length > 0 ? opponentNotInMill : opponentNodes)
     : [];
-    
+
   const currentActiveNode = activeHeldPiece?.sourceIdx ?? selectedNode;
   const validMoves = currentActiveNode !== null
     ? (getPiecesCount(turn) === 3
@@ -561,27 +571,25 @@ export default function App() {
       : (BOARD_CONNECTIONS[currentActiveNode] || []).filter(i => board[i] === null))
     : [];
 
+  const p1Color = players.WHITE.id === 1 ? 'WHITE' : 'BLACK';
+  const p2Color = players.WHITE.id === 2 ? 'WHITE' : 'BLACK';
+
+  const p1CapturedCount = captured[p1Color] || 0;
+  const p2CapturedCount = captured[p2Color] || 0;
+
   return (
     <div className="game-container" onClick={() => {
-      // Poništavanje selekcije ako se klikne van ploče
       if (selectedNode !== null || activeHeldPiece !== null) {
         setSelectedNode(null);
         setActiveHeldPiece(null);
       }
     }}>
-      {/* VIZUALNA FIGURA POD KURSOROM TIJEKOM NOŠENJA/POVLAČENJA */}
       {activeHeldPiece && !winner && (
-        <div 
+        <div
           className={`floating-cursor-piece ${activeHeldPiece.color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
           style={{ left: `${mousePos.x}px`, top: `${mousePos.y}px` }}
         />
       )}
-
-      {/* ODABIR JEZIKA */}
-      <div className="lang-switcher">
-        <button className={`lang-btn ${lang === 'hr' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('hr'); }}>HR</button>
-        <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('en'); }}>EN</button>
-      </div>
 
       <input
         type="file"
@@ -593,14 +601,20 @@ export default function App() {
 
       {/* 1. GLAVNI IZBORNIK */}
       {currentScreen === 'MAIN_MENU' && (
-        <div className="menu-card" onClick={(e) => e.stopPropagation()}>
-          <h1 className="menu-title">{t.menuTitle}</h1>
-          <div className="menu-list">
+        <div className="menu-card menu-card-wide" onClick={(e) => e.stopPropagation()}>
+          <div className="menu-header">
+            <h1 className="menu-title">{t.menuTitle}</h1>
+            <div className="lang-switcher-inline">
+              <button className={`lang-btn ${lang === 'hr' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('hr'); }}>HR</button>
+              <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('en'); }}>EN</button>
+            </div>
+          </div>
+          <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
-            <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
-            <button className="btn-menu" disabled>{t.playOnline}</button>
             <button className="btn-menu" onClick={() => { setProfileTab('STATS'); setCurrentScreen('PROFILE'); }}>{t.profile}</button>
+            <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
+            <button className="btn-menu" disabled>{t.playOnline}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('LEADERBOARD')}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
@@ -608,7 +622,7 @@ export default function App() {
         </div>
       )}
 
-      {/* AI SETUP TEŽINE (LAKO / SREDNJE / TEŠKO) */}
+      {/* AI SETUP */}
       {currentScreen === 'AI_SETUP' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.aiDifficultyTitle}</h2>
@@ -839,8 +853,8 @@ export default function App() {
                     <p><strong>{p1Name}</strong> {t.coinPrompt}</p>
                     <div className="coin-stage">
                       <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
-                        <div className="coin-face front">HEADS</div>
-                        <div className="coin-face back">TAILS</div>
+                        <div className="coin-face front">{t.heads}</div>
+                        <div className="coin-face back">{t.tails}</div>
                       </div>
                     </div>
                     <div className="coin-choice-btns">
@@ -884,24 +898,34 @@ export default function App() {
               </div>
 
               <div className="main-play-area">
-                {/* LIJEVI STALAK (BIJELI) */}
+                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 1 (POKRAJ NJEGOVOG LIJEVOG STALKA) */}
+                <div className="captured-tray tray-left">
+                  {Array.from({ length: p1CapturedCount }).map((_, i) => (
+                    <div
+                      key={`captured-by-p1-${i}`}
+                      className={`piece-slot piece-captured ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
+                    />
+                  ))}
+                </div>
+
+                {/* LIJEVI STALAK: UVIJEK IGRAČ 1 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
-                  <div className="rack-title">{players.WHITE.name}</div>
+                  <div className="rack-title">{p1Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
-                      const isPieceAvailable = i < unplaced.WHITE;
-                      const canInteract = turn === 'WHITE' && isPieceAvailable && (!isAIMode || aiColor !== 'WHITE');
+                      const isPieceAvailable = i < unplaced[p1Color];
+                      const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color);
 
                       return (
                         <div
-                          key={`white-${i}`}
-                          className={`piece-slot piece-white ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
+                          key={`p1-slot-${i}`}
+                          className={`piece-slot ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
                             isMouseDownRef.current = true;
                             playAudioEffect('pickup', soundEnabled);
-                            setActiveHeldPiece({ type: 'RACK', sourceIdx: null, color: 'WHITE' });
+                            setActiveHeldPiece({ type: 'RACK', sourceIdx: null, color: p1Color });
                             setSelectedNode(null);
                           }}
                         />
@@ -910,11 +934,11 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* PLOČA S PODRŠKOM ZA KLIK I MAGNETSKI DRAG-DROP */}
-                <Board 
-                  board={board} 
-                  selectedNode={currentActiveNode} 
-                  validMoves={validMoves} 
+                {/* PLOČA */}
+                <Board
+                  board={board}
+                  selectedNode={currentActiveNode}
+                  validMoves={validMoves}
                   removableNodes={removableNodes}
                   mustRemove={mustRemove}
                   turn={turn}
@@ -924,30 +948,35 @@ export default function App() {
                     executePlaceOrMove(targetIdx);
                   }}
                   onNodePick={(nodeIdx) => {
+                    if (mustRemove) {
+                      executePlaceOrMove(nodeIdx);
+                      return;
+                    }
+                    if (activeHeldPiece) return;
                     playAudioEffect('pickup', soundEnabled);
                     setSelectedNode(nodeIdx);
                     setActiveHeldPiece({ type: 'NODE', sourceIdx: nodeIdx, color: board[nodeIdx] });
                   }}
                 />
 
-                {/* DESNI STALAK (CRNI) */}
+                {/* DESNI STALAK: UVIJEK IGRAČ 2 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
-                  <div className="rack-title" style={{ color: '#cbd5e1' }}>{players.BLACK.name}</div>
+                  <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
-                      const isPieceAvailable = i < unplaced.BLACK;
-                      const canInteract = turn === 'BLACK' && isPieceAvailable && (!isAIMode || aiColor !== 'BLACK');
+                      const isPieceAvailable = i < unplaced[p2Color];
+                      const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color);
 
                       return (
                         <div
-                          key={`black-${i}`}
-                          className={`piece-slot piece-black ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
+                          key={`p2-slot-${i}`}
+                          className={`piece-slot ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
                             isMouseDownRef.current = true;
                             playAudioEffect('pickup', soundEnabled);
-                            setActiveHeldPiece({ type: 'RACK', sourceIdx: null, color: 'BLACK' });
+                            setActiveHeldPiece({ type: 'RACK', sourceIdx: null, color: p2Color });
                             setSelectedNode(null);
                           }}
                         />
@@ -955,11 +984,23 @@ export default function App() {
                     })}
                   </div>
                 </div>
+
+                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 2 (POKRAJ NJEGOVOG DESNOG STALKA) */}
+                <div className="captured-tray tray-right">
+                  {Array.from({ length: p2CapturedCount }).map((_, i) => (
+                    <div
+                      key={`captured-by-p2-${i}`}
+                      className={`piece-slot piece-captured ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
+                    />
+                  ))}
+                </div>
               </div>
+
             </>
           )}
         </>
-      )}
-    </div>
+      )
+      }
+    </div >
   );
 }
