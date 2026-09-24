@@ -4,6 +4,7 @@ import { BOARD_CONNECTIONS } from './constants/gameData';
 import { checkFormsMill, isPieceInMill, hasLegalMoves } from './logic/millEngine';
 import { getAIPlacementNode, getAIPieceToRemove, getAIMove } from './logic/aiEngine';
 import './App.css';
+import { getNextNodeByDirection } from './utils/keyboardNav';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -322,6 +323,7 @@ export default function App() {
   const [unplaced, setUnplaced] = useState({ WHITE: 9, BLACK: 9 });
   const [mustRemove, setMustRemove] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
+  const [keyboardFocusNode, setKeyboardFocusNode] = useState(0);
   const [winner, setWinner] = useState(null);
 
   // UNIVERZALNI SUSTAV NOŠENJA/POVLAČENJA (POINTER DRAG & DROP)
@@ -482,6 +484,11 @@ export default function App() {
   };
 
   // GLAVNA LOGIKA POTEZA
+  const handleCancelSelection = () => {
+    setSelectedNode(null);
+    setActiveHeldPiece(null);
+  };
+
   const executePlaceOrMove = (nodeIndex, customSource = null) => {
     if (winner) return;
     const opponent = turn === 'WHITE' ? 'BLACK' : 'WHITE';
@@ -616,8 +623,38 @@ export default function App() {
       }, 500);
 
       return () => clearTimeout(timer);
+
     }
+
+
   }, [turn, mustRemove, board, unplaced, isAIMode, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
+
+  // KONTROLA IGRE TIPKOVNICOM (WASD + STRELICE + ENTER / SPACE)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+      if (isAIMode && turn === aiColor) return;
+
+      let direction = null;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') direction = 'UP';
+      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') direction = 'DOWN';
+      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') direction = 'LEFT';
+      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') direction = 'RIGHT';
+
+      if (direction) {
+        e.preventDefault();
+        setKeyboardFocusNode((prev) => getNextNodeByDirection(prev, direction));
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (keyboardFocusNode !== null) {
+          executePlaceOrMove(keyboardFocusNode);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentScreen, setupStep, winner, isAIMode, turn, aiColor, keyboardFocusNode, executePlaceOrMove]);
 
   const opponentColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
   const opponentNodes = board.map((val, idx) => val === opponentColor ? idx : null).filter(val => val !== null);
@@ -1007,7 +1044,15 @@ export default function App() {
                   turn={turn}
                   isAIMode={isAIMode}
                   aiColor={aiColor}
+                  focusedNode={keyboardFocusNode}
+                  onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
+                    // Ako klikneš na već odabrano polje, poništi selekciju
+                    if (selectedNode === targetIdx) {
+                      handleCancelSelection();
+                      return;
+                    }
+                    setKeyboardFocusNode(targetIdx);
                     executePlaceOrMove(targetIdx);
                   }}
                   onNodePick={(nodeIdx) => {
@@ -1015,9 +1060,14 @@ export default function App() {
                       executePlaceOrMove(nodeIdx);
                       return;
                     }
-                    if (activeHeldPiece) return;
+                    // Ako ponovno klikneš istu figuru koju držiš -> ostavi je (deselect)
+                    if (selectedNode === nodeIdx) {
+                      handleCancelSelection();
+                      return;
+                    }
                     playAudioEffect('pickup', soundEnabled);
                     setSelectedNode(nodeIdx);
+                    setKeyboardFocusNode(nodeIdx);
                     setActiveHeldPiece({ type: 'NODE', sourceIdx: nodeIdx, color: board[nodeIdx] });
                   }}
                 />

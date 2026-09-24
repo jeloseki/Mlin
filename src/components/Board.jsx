@@ -26,7 +26,8 @@ export default function Board({
   turn,
   isAIMode,
   aiColor,
-  mustRemove
+  mustRemove,
+  focusedNode
 }) {
   const isAITurn = isAIMode && turn === aiColor;
   const boardRef = useRef(null);
@@ -94,6 +95,7 @@ export default function Board({
         const isSelected = selectedNode === idx;
         const isValidTarget = validMoves.includes(idx);
         const isRemovable = removableNodes.includes(idx);
+        const isKeyboardFocused = focusedNode === idx;
         
         const canPickPiece = piece === turn && !isAITurn && !mustRemove;
         const inMill = piece ? isPieceInMill(board, idx, piece) : false;
@@ -101,7 +103,7 @@ export default function Board({
         return (
           <div
             key={idx}
-            className={`board-node-slot ${isValidTarget ? 'valid-target' : ''} ${isRemovable ? 'removable-target' : ''}`}
+            className={`board-node-slot ${isValidTarget ? 'valid-target' : ''} ${isRemovable ? 'removable-target' : ''} ${isKeyboardFocused ? 'keyboard-focused' : ''}`}
             style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
             onClick={(e) => {
               e.stopPropagation();
@@ -109,6 +111,7 @@ export default function Board({
               onNodeInteract(idx);
             }}
           >
+            {isKeyboardFocused && <div className="keyboard-focus-ring" />}
             {!piece && isValidTarget && <div className="target-dot" />}
 
             {piece && (
