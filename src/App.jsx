@@ -325,6 +325,10 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [keyboardFocusNode, setKeyboardFocusNode] = useState(0);
   const [winner, setWinner] = useState(null);
+  // Vremenski modovi i satovi
+  const [gameCategory, setGameCategory] = useState('CASUAL');
+  const [timeControl, setTimeControl] = useState(120);
+  const [timeLeft, setTimeLeft] = useState({ WHITE: 120, BLACK: 120 });
 
   // UNIVERZALNI SUSTAV NOŠENJA/POVLAČENJA (POINTER DRAG & DROP)
   const [activeHeldPiece, setActiveHeldPiece] = useState(null);
@@ -410,6 +414,10 @@ export default function App() {
           BLACK: { name: p1Name, id: 1 }
         });
         setAiColor('WHITE');
+
+        const initialSecondsAI = gameCategory === 'COMPETITIVE' ? timeControl : null;
+        setTimeLeft({ WHITE: initialSecondsAI, BLACK: initialSecondsAI });
+
         setTurn('WHITE');
         setSetupStep('PLAY');
       } else {
@@ -438,6 +446,8 @@ export default function App() {
     if (isAIMode) {
       setAiColor(p2ChosenColor);
     }
+    const initialSeconds = gameCategory === 'COMPETITIVE' ? timeControl : null;
+    setTimeLeft({ WHITE: initialSeconds, BLACK: initialSeconds });
 
     setTurn('WHITE');
     setSetupStep('PLAY');
@@ -626,8 +636,30 @@ export default function App() {
 
     }
 
-
   }, [turn, mustRemove, board, unplaced, isAIMode, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
+
+  // ŠAHOVSKI SAT (ODBROJAVANJE VREMENA)
+  useEffect(() => {
+    if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        const currentTime = prev[turn];
+        if (currentTime === null || currentTime === undefined) return prev;
+
+        if (currentTime <= 1) {
+          clearInterval(timer);
+          // Igraču na potezu je isteklo vrijeme -> protivnik pobjeđuje!
+          const winningColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
+          handleGameEnd(winningColor);
+          return { ...prev, [turn]: 0 };
+        }
+        return { ...prev, [turn]: currentTime - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameCategory, currentScreen, setupStep, winner, turn]);
 
   // KONTROLA IGRE TIPKOVNICOM (WASD + STRELICE + ENTER / SPACE)
   useEffect(() => {
@@ -657,6 +689,13 @@ export default function App() {
   }, [currentScreen, setupStep, winner, isAIMode, turn, aiColor, keyboardFocusNode, executePlaceOrMove]);
 
   const opponentColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
+  // Formatiranje sekundi u MM:SS prikaz
+  const formatTime = (seconds) => {
+    if (seconds === null || seconds === undefined) return '--:--';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
   const opponentNodes = board.map((val, idx) => val === opponentColor ? idx : null).filter(val => val !== null);
   const opponentNotInMill = opponentNodes.filter(idx => !isPieceInMill(board, idx, opponentColor));
 
@@ -941,6 +980,53 @@ export default function App() {
                       <label>{t.p2Label}</label>
                       <input type="text" maxLength={12} value={p2Name} disabled={isAIMode} onChange={(e) => setP2Name(e.target.value)} />
                     </div>
+
+                    {/* ODABIR KATEGORIJE: CASUAL ILI NATJECATELJSKI */}
+                    <div className="game-mode-selector">
+                      <div className="mode-toggle-group">
+                        <button
+                          type="button"
+                          className={`mode-btn ${gameCategory === 'CASUAL' ? 'active' : ''}`}
+                          onClick={() => setGameCategory('CASUAL')}
+                        >
+                          ☕ Casual
+                        </button>
+                        <button
+                          type="button"
+                          className={`mode-btn ${gameCategory === 'COMPETITIVE' ? 'active' : ''}`}
+                          onClick={() => setGameCategory('COMPETITIVE')}
+                        >
+                          ⚡ Natjecateljski
+                        </button>
+                      </div>
+
+                      {gameCategory === 'COMPETITIVE' && (
+                        <div className="time-preset-group">
+                          <button
+                            type="button"
+                            className={`time-preset-btn ${timeControl === 300 ? 'selected' : ''}`}
+                            onClick={() => setTimeControl(300)}
+                          >
+                            5 min (Classic)
+                          </button>
+                          <button
+                            type="button"
+                            className={`time-preset-btn ${timeControl === 120 ? 'selected' : ''}`}
+                            onClick={() => setTimeControl(120)}
+                          >
+                            2 min (Rapid)
+                          </button>
+                          <button
+                            type="button"
+                            className={`time-preset-btn ${timeControl === 45 ? 'selected' : ''}`}
+                            onClick={() => setTimeControl(45)}
+                          >
+                            45s (Blitz)
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
                     <button className="btn-gold" onClick={() => setSetupStep('COIN_TOSS')}>{t.btnNextCoin}</button>
                     <br />
                     <button className="btn-menu btn-back" style={{ width: '100%' }} onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
@@ -990,7 +1076,38 @@ export default function App() {
                       {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
                     </div>
                     {mustRemove && <div className="status-alert">{t.alertRemove}</div>}
+                    {/* DIGITALNI ŠAHOVSKI SATOVI */}
+                    {gameCategory === 'COMPETITIVE' && (
+                      <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0' }}>
+                        <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          background: turn === 'WHITE' ? '#1e293b' : '#0f172a',
+                          border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155',
+                          color: (timeLeft.WHITE !== null && timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff',
+                          fontWeight: 'bold',
+                          fontSize: '1.1rem',
+                          fontFamily: 'monospace'
+                        }}>
+                          ⚪ {players.WHITE.name}: {formatTime(timeLeft.WHITE)}
+                        </div>
+
+                        <div className={`timer-badge ${turn === 'BLACK' ? 'timer-active' : ''}`} style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          background: turn === 'BLACK' ? '#1e293b' : '#0f172a',
+                          border: turn === 'BLACK' ? '2px solid #eab308' : '1px solid #334155',
+                          color: (timeLeft.BLACK !== null && timeLeft.BLACK <= 10) ? '#ef4444' : '#ffffff',
+                          fontWeight: 'bold',
+                          fontSize: '1.1rem',
+                          fontFamily: 'monospace'
+                        }}>
+                          ⚫ {players.BLACK.name}: {formatTime(timeLeft.BLACK)}
+                        </div>
+                      </div>
+                    )}
                   </>
+                  
                 )}
                 <button className="btn-menu btn-back" style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }} onClick={() => setCurrentScreen('MAIN_MENU')}>
                   {t.btnQuit}
