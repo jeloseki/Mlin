@@ -5,6 +5,7 @@ import { checkFormsMill, isPieceInMill, hasLegalMoves } from './logic/millEngine
 import { getAIPlacementNode, getAIPieceToRemove, getAIMove } from './logic/aiEngine';
 import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
+import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -109,7 +110,7 @@ const TRANSLATIONS = {
     gameOverWinner: "🎉 Pobjednik je"
   },
   en: {
-    menuTitle: "NINE MEN'S MORRIS",
+    menuTitle: "NINE MEN'S MORRIS / MILLS",
     playOffline: "👥 2 Players (Local)",
     playAI: "🤖 Play Against Computer (AI)",
     playOnline: "🌐 Play Online (Coming Soon)",
@@ -158,7 +159,7 @@ const TRANSLATIONS = {
     titleNames: "Enter Player Names",
     p1Label: "Player 1 (Max 12 chars):",
     p2Label: "Player 2 (Max 12 chars):",
-    btnNextCoin: "Next to Coin Toss",
+    btnNextCoin: "Continue to Coin Toss",
     titleCoin: "Coin Toss",
     coinPrompt: "chooses the coin side:",
     heads: "HEADS",
@@ -255,6 +256,13 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('MAIN_MENU');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const fileInputRef = useRef(null);
+
+  const [leaderboard, setLeaderboard] = useState([]);
+
+  const fetchLeaderboard = async () => {
+    const data = await getLeaderboard();
+    setLeaderboard(data);
+  };
 
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('mlin_user_profile');
@@ -386,6 +394,28 @@ export default function App() {
     setCaptured({ WHITE: 0, BLACK: 0 });
   };
 
+  const handleProceedToCoinToss = async () => {
+    // 1. Učitaj ili kreiraj profil za prvog igrača u Firebaseu
+    const p1Data = await getOrCreateProfile(p1Name);
+    if (p1Data) {
+      setProfile(prev => ({
+        ...prev,
+        name: p1Data.name,
+        points: p1Data.rankPoints || 0,
+        wins: p1Data.wins || 0,
+        losses: p1Data.losses || 0
+      }));
+    }
+
+    // 2. Ako nije AI, registriraj/učitaj i drugog igrača
+    if (!isAIMode && p2Name) {
+      await getOrCreateProfile(p2Name);
+    }
+
+    // 3. Prebaci na bacanje novčića
+    setSetupStep('COIN_TOSS');
+  };
+
   const triggerCoinFlip = (choice) => {
     if (isFlipping) return;
     setIsFlipping(true);
@@ -477,13 +507,18 @@ export default function App() {
     const today = new Date();
     const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
 
+    const opponentName = isAIMode ? `AI (${aiDifficulty})` : (userColor === 'WHITE' ? players.BLACK.name : players.WHITE.name);
+
     const newMatch = {
-      vs: isAIMode ? `AI (${aiDifficulty})` : (userColor === 'WHITE' ? players.BLACK.name : players.WHITE.name),
+      player: profile.name,
+      vs: opponentName,
       isWin: isUserWinner,
       score: isUserWinner ? '+12' : '-6',
-      date: dateStr
+      date: dateStr,
+      category: gameCategory
     };
 
+    // 1. Lokalno ažuriranje profila (da sučelje odmah reagira)
     setProfile(prev => ({
       ...prev,
       points: newPoints,
@@ -491,6 +526,16 @@ export default function App() {
       losses: !isUserWinner ? prev.losses + 1 : prev.losses,
       matchHistory: [newMatch, ...prev.matchHistory.slice(0, 9)]
     }));
+
+    // 2. Trajno spremanje u Firebase bazu podataka
+    saveMatchHistory(newMatch);
+
+    // Ako je natjecateljski mod protiv drugog igrača (nije AI), ažuriraj rang bodove obojici
+    if (!isAIMode) {
+      const winnerPlayer = isUserWinner ? profile.name : opponentName;
+      const loserPlayer = isUserWinner ? opponentName : profile.name;
+      updateMatchResults(winnerPlayer, loserPlayer, false, gameCategory);
+    }
   };
 
   // GLAVNA LOGIKA POTEZA
@@ -754,7 +799,7 @@ export default function App() {
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
             <button className="btn-menu" disabled>{t.playOnline}</button>
-            <button className="btn-menu" onClick={() => setCurrentScreen('LEADERBOARD')}>{t.leaderboard}</button>
+            <button className="btn-menu" onClick={() => {fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
           </div>
@@ -908,7 +953,7 @@ export default function App() {
         </div>
       )}
 
-      {/* LEADERBOARD */}
+{/* LEADERBOARD */}
       {currentScreen === 'LEADERBOARD' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.leaderboard}</h2>
@@ -921,10 +966,24 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              <tr><td>1</td><td>Grandmaster_HR</td><td>3840</td></tr>
-              <tr><td>2</td><td>MlinKing</td><td>3110</td></tr>
-              <tr><td>3</td><td>Ana_99</td><td>2685</td></tr>
-              <tr className="highlight-row"><td>42</td><td>{profile.name} (Vi)</td><td>{profile.points}</td></tr>
+              {leaderboard.length === 0 ? (
+                <tr>
+                  <td colSpan="3" style={{ textAlign: 'center', padding: '12px', color: '#94a3b8' }}>
+                    Učitavanje ljestvice...
+                  </td>
+                </tr>
+              ) : (
+                leaderboard.map((entry, idx) => {
+                  const isCurrent = entry.name === profile.name;
+                  return (
+                    <tr key={entry.name || idx} className={isCurrent ? 'highlight-row' : ''}>
+                      <td>{idx + 1}</td>
+                      <td>{entry.name}{isCurrent ? ' (Vi)' : ''}</td>
+                      <td>{entry.rankPoints || 0}</td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
           <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
@@ -1027,7 +1086,7 @@ export default function App() {
                       )}
 
                     </div>
-                    <button className="btn-gold" onClick={() => setSetupStep('COIN_TOSS')}>{t.btnNextCoin}</button>
+                    <button className="btn-gold" onClick={handleProceedToCoinToss}>{t.btnNextCoin}</button>
                     <br />
                     <button className="btn-menu btn-back" style={{ width: '100%' }} onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
                   </>
@@ -1107,7 +1166,7 @@ export default function App() {
                       </div>
                     )}
                   </>
-                  
+
                 )}
                 <button className="btn-menu btn-back" style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }} onClick={() => setCurrentScreen('MAIN_MENU')}>
                   {t.btnQuit}
