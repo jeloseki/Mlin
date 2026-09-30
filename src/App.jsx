@@ -6,6 +6,7 @@ import { getAIPlacementNode, getAIPieceToRemove, getAIMove } from './logic/aiEng
 import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
+import { useNavigate } from 'react-router-dom';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -250,6 +251,7 @@ const playAudioEffect = (type, soundEnabled = true) => {
 };
 
 export default function App() {
+  const navigate = useNavigate();
   const [lang, setLang] = useState('hr');
   const t = TRANSLATIONS[lang];
 
@@ -600,6 +602,10 @@ export default function App() {
       if (checkFormsMill(newBoard, nodeIndex, turn)) {
         setMustRemove(true);
       } else {
+        if (!hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
+          handleGameEnd(turn);
+          return;
+        }
         setTurn(opponent);
       }
       return;
@@ -674,6 +680,10 @@ export default function App() {
         const move = getAIMove(board, aiColor, aiDifficulty);
         if (move) {
           executePlaceOrMove(move.to, move.from);
+        } else {
+          // AI nema nijedan legalan potez -> čovjek pobjeđuje!
+          const humanPlayer = aiColor === 'WHITE' ? 'BLACK' : 'WHITE';
+          handleGameEnd(humanPlayer);
         }
       }, 500);
 
@@ -793,13 +803,33 @@ export default function App() {
               <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('en'); }}>EN</button>
             </div>
           </div>
+          {/* 👇 CENTRIRANI ADMIN GUMB IZNAD 4x2 MREŽE */}
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '0 0 16px 0' }}>
+            <button
+              type="button"
+              onClick={() => navigate('/admin')}
+              style={{
+                backgroundColor: '#1e293b',
+                color: '#fbbf24',
+                border: '1px solid #d97706',
+                padding: '8px 20px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '0.5px'
+              }}
+            >
+              ⚙️ Admin Panel
+            </button>
+          </div>
           <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
             <button className="btn-menu" onClick={() => { setProfileTab('STATS'); setCurrentScreen('PROFILE'); }}>{t.profile}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
             <button className="btn-menu" disabled>{t.playOnline}</button>
-            <button className="btn-menu" onClick={() => {fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
+            <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
           </div>
@@ -953,7 +983,7 @@ export default function App() {
         </div>
       )}
 
-{/* LEADERBOARD */}
+      {/* LEADERBOARD */}
       {currentScreen === 'LEADERBOARD' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.leaderboard}</h2>
