@@ -1,5 +1,6 @@
 import { BOARD_CONNECTIONS } from '../constants/gameData';
 import { checkFormsMill, isPieceInMill, MILL_TRIPLETS } from './millEngine';
+import { bzvz }
 
 const getOpponent = (color) => (color === 'WHITE' ? 'BLACK' : 'WHITE');
 
