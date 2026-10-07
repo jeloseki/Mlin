@@ -323,8 +323,9 @@ export default function AdminPanel() {
     setIsCountryOpen(false);
   };
 
-  const handleSubmitProfile = (e) => {
-    e.preventDefault();
+  // 1. Isključivo kreira ili ažurira profil i ostaje u Admin panelu
+  const handleCreateProfileOnly = (e) => {
+    if (e) e.preventDefault();
     if (!name.trim()) return;
 
     const finalCountry = country.trim().toUpperCase() || 'HR';
@@ -360,8 +361,6 @@ export default function AdminPanel() {
           }));
         }
       }
-
-      handleCancelEdit();
     } else {
       const newProfile = {
         id: 'player-' + Date.now(),
@@ -377,8 +376,31 @@ export default function AdminPanel() {
       const updated = [...profiles, newProfile];
       setProfiles(updated);
       localStorage.setItem('mlin_admin_profiles', JSON.stringify(updated));
+    }
 
-      handleSelectProfile(newProfile);
+    handleCancelEdit();
+  };
+
+  // 2. Isključivo pokreće igru s unesenim/postojećim profilom
+  const handlePlayDirectly = (e) => {
+    if (e) e.preventDefault();
+    if (!name.trim()) return;
+
+    const existing = profiles.find(p => p.name.toLowerCase() === name.trim().toLowerCase());
+
+    if (existing) {
+      handleSelectProfile(existing);
+    } else {
+      const tempProfile = {
+        name: name.trim(),
+        avatar,
+        bio: bio.trim() || 'Spreman za igru!',
+        country: country.trim().toUpperCase() || 'HR',
+        points: 0,
+        wins: 0,
+        losses: 0
+      };
+      handleSelectProfile(tempProfile);
     }
   };
 
@@ -508,7 +530,7 @@ export default function AdminPanel() {
 
       {/* FORMA ZA UNOS / UREĐIVANJE */}
       {!isDeleteMode && (
-        <form onSubmit={handleSubmitProfile} style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '10px', marginBottom: '28px', border: editingId ? '1px solid #f59e0b' : '1px solid #334155' }}>
+        <form onSubmit={handleCreateProfileOnly} style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '10px', marginBottom: '28px', border: editingId ? '1px solid #f59e0b' : '1px solid #334155' }}>
           <h4 style={{ margin: '0 0 16px 0', color: editingId ? '#f59e0b' : '#38bdf8' }}>
             {editingId ? '✏️ Uredi profil' : '➕ Novi igrač — Kreiraj profil'}
           </h4>
@@ -698,30 +720,105 @@ export default function AdminPanel() {
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="submit"
-                style={{
-                  flex: 1,
-                  padding: '9px 12px',
-                  backgroundColor: editingId ? '#f59e0b' : '#22c55e',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                {editingId ? 'Spremi izmjene' : 'Kreiraj i igraj'}
-              </button>
+            <div style={{ 
+              gridColumn: '1 / -1', 
+              display: 'flex', 
+              justifyContent: 'flex-start', 
+              alignItems: 'center', 
+              gap: '24px', 
+              marginTop: '10px' 
+            }}>
+              {editingId ? (
+                <button
+                  type="submit"
+                  style={{
+                    minWidth: '180px',
+                    padding: '11px 20px',
+                    backgroundColor: '#f59e0b',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 'bold',
+                    fontSize: '0.95rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 8px rgba(245, 158, 11, 0.3)'
+                  }}
+                >
+                  <span>💾</span>
+                  <span>Spremi izmjene</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  style={{
+                    minWidth: '180px',
+                    padding: '11px 20px',
+                    backgroundColor: '#2563eb',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 'bold',
+                    fontSize: '0.95rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)'
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>➕</span>
+                  <span>Kreiraj profil</span>
+                </button>
+              )}
 
-              {editingId && (
+              {editingId ? (
                 <button
                   type="button"
                   onClick={handleCancelEdit}
-                  style={{ padding: '9px 12px', backgroundColor: '#64748b', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                  style={{
+                    minWidth: '140px',
+                    padding: '11px 18px',
+                    backgroundColor: '#64748b',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
                 >
                   Odustani
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePlayDirectly}
+                  style={{
+                    minWidth: '160px',
+                    padding: '11px 20px',
+                    backgroundColor: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 'bold',
+                    fontSize: '0.95rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)'
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🎮</span>
+                  <span>Igraj</span>
                 </button>
               )}
             </div>
@@ -785,7 +882,7 @@ export default function AdminPanel() {
               <span style={{ fontSize: '2rem' }}>{p.avatar}</span>
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc' }}>
-                 
+
                   <span style={{ fontSize: '1rem', marginLeft: '2px' }} title={p.country}>
                     <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>{p.name}</span>
@@ -797,7 +894,7 @@ export default function AdminPanel() {
                         </span>
                       )}
                     </div>
-                    
+
                   </span>{' '}
                   <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({p.country})</span>
                   {isIvica && (

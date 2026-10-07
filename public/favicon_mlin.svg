@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <!-- Tamna moderna pozadina -->
+    <linearGradient id="bgMlinClean" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1128" />
+      <stop offset="100%" stop-color="#141f36" />
+    </linearGradient>
+
+    <!-- Zlatne figure -->
+    <radialGradient id="goldDotClean" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="55%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#9a3412" />
+    </radialGradient>
+
+    <!-- Plava figura za centar trećeg nivoa -->
+    <radialGradient id="cyanDotClean" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="60%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#082f49" />
+    </radialGradient>
+
+    <!-- Diskretna sjena za figure -->
+    <filter id="dotShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity="0.8" />
+    </filter>
+  </defs>
+
+  <!-- Baza favikone -->
+  <rect width="64" height="64" rx="14" fill="url(#bgMlinClean)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ========================================== -->
+  <!-- 1. PUNA PLOČA MLINA U POZADINI            -->
+  <!-- ========================================== -->
+  <!-- Spoljašnji kvadrat -->
+  <rect x="10" y="10" width="44" height="44" fill="none" stroke="#1e293b" stroke-width="1.5" />
+  <!-- Srednji kvadrat -->
+  <rect x="18" y="18" width="28" height="28" fill="none" stroke="#1e293b" stroke-width="1.5" />
+  <!-- Unutrašnji kvadrat -->
+  <rect x="26" y="26" width="12" height="12" fill="none" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- Krst ploče mlina -->
+  <line x1="32" y1="10" x2="32" y2="26" stroke="#1e293b" stroke-width="1.5" />
+  <line x1="32" y1="38" x2="32" y2="54" stroke="#1e293b" stroke-width="1.5" />
+  <line x1="10" y1="32" x2="26" y2="32" stroke="#1e293b" stroke-width="1.5" />
+  <line x1="38" y1="32" x2="54" y2="32" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ========================================== -->
+  <!-- 2. LINIJE KOJE FORMIRAJU SLOVO M           -->
+  <!-- ========================================== -->
+  <!-- Samo gornja (prva) vodoravna linija -->
+  <line x1="10" y1="10" x2="54" y2="10" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- Okomite linije -->
+  <!-- Lijeva okomita (puna dužina) -->
+  <line x1="10" y1="10" x2="10" y2="54" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Srednja okomita (kraća, vodi s vrha do unutrašnjeg nivoa) -->
+  <line x1="32" y1="10" x2="32" y2="26" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Desna okomita (puna dužina) -->
+  <line x1="54" y1="10" x2="54" y2="54" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- ========================================== -->
+  <!-- 3. FIGURE (SVE IDENTIČNE VELIČINE r="2.6") -->
+  <!-- ========================================== -->
+  <!-- Lijeva okomita linija (vrh, sredina, dno) -->
+  <circle cx="10" cy="10" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+  <circle cx="10" cy="32" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+  <circle cx="10" cy="54" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+
+  <!-- Desna okomita linija (vrh, sredina, dno) -->
+  <circle cx="54" cy="10" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+  <circle cx="54" cy="32" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+  <circle cx="54" cy="54" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+
+  <!-- Gornja vodoravna linija: središnja figura -->
+  <circle cx="32" cy="10" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+
+  <!-- Druga razina: samo središnja figura -->
+  <circle cx="32" cy="18" r="2.6" fill="url(#goldDotClean)" filter="url(#dotShadow)" />
+
+  <!-- Treća razina: samo središnja figura (plava) -->
+  <circle cx="32" cy="26" r="2.6" fill="url(#cyanDotClean)" stroke="#bae6fd" stroke-width="0.8" filter="url(#dotShadow)" />
+</svg>
