@@ -1,6 +1,7 @@
 // src/AdminPanel.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { quickMatch } from './services/multiplayer';
 
 const AVATAR_OPTIONS = ['🦁', '🧙‍♂️', '⚡', '🌙', '🎨', '🕹️', '❄️', '🤫', '🚀', '🌟', '☕', '🐱', '🤖', '🦊', '🦉', '🎯'];
 
@@ -239,6 +240,31 @@ const DEFAULT_IVICA = {
 
 export default function AdminPanel() {
   const navigate = useNavigate();
+
+  const [isSearchingMatch, setIsSearchingMatch] = useState(false);
+
+  const handleStartOnlineMatch = (selectedProfile = null) => {
+    setIsSearchingMatch(true);
+
+    // Ako je proslijeđen profil s kartice koristi njega, inače dohvati aktivni
+    const profileToUse = selectedProfile || JSON.parse(localStorage.getItem('mlin_user_profile')) || {
+      name: name.trim() || 'Igrač',
+      country: country || 'HR',
+      avatar: avatar || '🦊'
+    };
+
+    quickMatch(
+      profileToUse,
+      (gameId, myColor) => {
+        setIsSearchingMatch(false);
+        sessionStorage.setItem('mlin_my_color', myColor);
+        navigate(`/game/${gameId}`);
+      },
+      (gameId) => {
+        console.log("Čekamo protivnika u sobi:", gameId);
+      }
+    );
+  };
 
   const [profiles, setProfiles] = useState(() => {
     const saved = localStorage.getItem('mlin_admin_profiles');
@@ -720,13 +746,13 @@ export default function AdminPanel() {
               />
             </div>
 
-            <div style={{ 
-              gridColumn: '1 / -1', 
-              display: 'flex', 
-              justifyContent: 'flex-start', 
-              alignItems: 'center', 
-              gap: '24px', 
-              marginTop: '10px' 
+            <div style={{
+              gridColumn: '1 / -1',
+              display: 'flex',
+              justifyContent: 'flex-start',
+              alignItems: 'center',
+              gap: '24px',
+              marginTop: '10px'
             }}>
               {editingId ? (
                 <button
@@ -913,12 +939,39 @@ export default function AdminPanel() {
 
               {!isDeleteMode && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+
                   <button
                     type="button"
-                    style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem' }}
+                    onClick={() => handleSelectProfile(p)}
+                    style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
                   >
                     Igraj
                   </button>
+
+                  {/* NOVI GUMB: Desno od Igraj */}
+                  <button
+                    type="button"
+                    title="Pronađi online protivnika"
+                    disabled={isSearchingMatch}
+                    onClick={() => handleStartOnlineMatch(p)}
+                    style={{
+                      backgroundColor: isSearchingMatch ? '#475569' : '#8b5cf6',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      cursor: isSearchingMatch ? 'not-allowed' : 'pointer',
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    {isSearchingMatch ? '⏳ Tražim...' : '⚡ Online'}
+                  </button>
+
+                  {/* Postojeći gumb Uredi profil */}
                   <button
                     type="button"
                     title="Uredi profil"

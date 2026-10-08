@@ -6,7 +6,9 @@ import { getAIPlacementNode, getAIPieceToRemove, getAIMove } from './logic/aiEng
 import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -213,9 +215,7 @@ const playAudioEffect = (type, soundEnabled = true) => {
       osc.frequency.exponentialRampToValueAtTime(250, now + 0.12);
       gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
       osc.start(); osc.stop(now + 0.12);
-    }
-    else if (type === 'victory') {
-      // Pobjednička fanfara: 4 uzlazna tona (C5, E5, G5, C6)
+    } else if (type === 'victory') {
       const notes = [523.25, 659.25, 783.99, 1046.50];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
@@ -231,7 +231,6 @@ const playAudioEffect = (type, soundEnabled = true) => {
         osc.stop(now + idx * 0.12 + duration);
       });
     } else if (type === 'defeat') {
-      // Zvuk poraza: padajući tonovi s klizanjem naniže
       const tones = [440, 370, 280];
       tones.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
@@ -251,7 +250,14 @@ const playAudioEffect = (type, soundEnabled = true) => {
 };
 
 export default function App() {
+  const location = useLocation();
+  const onlineGameId = location.pathname.startsWith('/game/')
+    ? location.pathname.split('/game/')[1]
+    : null;
+
+  const myColor = sessionStorage.getItem('mlin_my_color');
   const navigate = useNavigate();
+
   const [lang, setLang] = useState('hr');
   const t = TRANSLATIONS[lang];
 
@@ -260,11 +266,6 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const [leaderboard, setLeaderboard] = useState([]);
-
-  const fetchLeaderboard = async () => {
-    const data = await getLeaderboard();
-    setLeaderboard(data);
-  };
 
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('mlin_user_profile');
@@ -279,10 +280,6 @@ export default function App() {
     };
   });
 
-  useEffect(() => {
-    localStorage.setItem('mlin_user_profile', JSON.stringify(profile));
-  }, [profile]);
-
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
 
@@ -290,28 +287,6 @@ export default function App() {
   const [isAIMode, setIsAIMode] = useState(false);
   const [aiDifficulty, setAiDifficulty] = useState('EASY');
   const [aiColor, setAiColor] = useState('BLACK');
-
-  const totalMatches = profile.wins + profile.losses;
-  const winRate = totalMatches > 0 ? Math.round((profile.wins / totalMatches) * 100) : 0;
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfile((prev) => ({ ...prev, avatar: reader.result }));
-        setProfileTab('STATS');
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const renderAvatar = (src) => {
-    if (src && (src.startsWith('data:image') || src.startsWith('http'))) {
-      return <img src={src} alt="Avatar" className="avatar-img" />;
-    }
-    return <span>{src || '🦁'}</span>;
-  };
 
   const [setupStep, setSetupStep] = useState('NAMES');
   const [p1Name, setP1Name] = useState(profile.name);
@@ -335,16 +310,57 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [keyboardFocusNode, setKeyboardFocusNode] = useState(0);
   const [winner, setWinner] = useState(null);
-  // Vremenski modovi i satovi
+
   const [gameCategory, setGameCategory] = useState('CASUAL');
   const [timeControl, setTimeControl] = useState(120);
   const [timeLeft, setTimeLeft] = useState({ WHITE: 120, BLACK: 120 });
 
-  // UNIVERZALNI SUSTAV NOŠENJA/POVLAČENJA (POINTER DRAG & DROP)
   const [activeHeldPiece, setActiveHeldPiece] = useState(null);
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
+  // 1. Sinkronizacija profila u localStorage
+  useEffect(() => {
+    localStorage.setItem('mlin_user_profile', JSON.stringify(profile));
+  }, [profile]);
+
+  // 2. Ako smo u online meču, automatski gasi AI i odmah prebaci na PLAY ekran
+  useEffect(() => {
+    if (onlineGameId) {
+      setIsAIMode(false);
+      setCurrentScreen('GAME');
+      setSetupStep('PLAY');
+    }
+  }, [onlineGameId]);
+
+  // 3. Firestore sinkronizacija u stvarnom vremenu
+  useEffect(() => {
+    if (!onlineGameId) return;
+
+    const unsubscribe = onSnapshot(doc(db, "games", onlineGameId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.board) setBoard(data.board);
+        if (data.currentTurn) setTurn(data.currentTurn);
+        if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
+        if (data.unplaced) setUnplaced(data.unplaced);
+        if (data.playerWhite && data.playerBlack) {
+          const whiteName = typeof data.playerWhite === 'object' ? (data.playerWhite.name || 'Bijeli') : data.playerWhite;
+          const blackName = typeof data.playerBlack === 'object' ? (data.playerBlack.name || 'Crni') : data.playerBlack;
+          setPlayers({
+            WHITE: { name: whiteName, id: 1 },
+            BLACK: { name: blackName, id: 2 }
+          });
+          setP1Name(whiteName);
+          setP2Name(blackName);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [onlineGameId]);
+
+  // 4. Globalni slušač za pomicanje miša
   useEffect(() => {
     const handleMouseMove = (e) => {
       setMousePos({ x: e.clientX, y: e.clientY });
@@ -361,6 +377,132 @@ export default function App() {
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
   }, []);
+
+  // 5. AI POTEZ AUTOMATIKA
+  useEffect(() => {
+    if (!isAIMode || onlineGameId || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+
+    if (turn === aiColor) {
+      const timer = setTimeout(() => {
+        if (mustRemove) {
+          const targetNode = getAIPieceToRemove(board, turn === 'WHITE' ? 'BLACK' : 'WHITE', aiDifficulty);
+          if (targetNode !== null) {
+            executePlaceOrMove(targetNode);
+          }
+          return;
+        }
+
+        if (unplaced[aiColor] > 0) {
+          const targetNode = getAIPlacementNode(board, aiColor, aiDifficulty);
+          if (targetNode !== null) {
+            executePlaceOrMove(targetNode);
+          }
+          return;
+        }
+
+        const move = getAIMove(board, aiColor, aiDifficulty);
+        if (move) {
+          executePlaceOrMove(move.to, move.from);
+        } else {
+          const humanPlayer = aiColor === 'WHITE' ? 'BLACK' : 'WHITE';
+          handleGameEnd(humanPlayer);
+        }
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [turn, mustRemove, board, unplaced, isAIMode, onlineGameId, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
+
+  // 6. ŠAHOVSKI SAT
+  useEffect(() => {
+    if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        const currentTime = prev[turn];
+        if (currentTime === null || currentTime === undefined) return prev;
+
+        if (currentTime <= 1) {
+          clearInterval(timer);
+          const winningColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
+          handleGameEnd(winningColor);
+          return { ...prev, [turn]: 0 };
+        }
+        return { ...prev, [turn]: currentTime - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameCategory, currentScreen, setupStep, winner, turn]);
+
+  // 7. KONTROLA IGRE TIPKOVNICOM
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+      if (onlineGameId && turn !== myColor) return;
+      if (isAIMode && turn === aiColor) return;
+
+      let direction = null;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') direction = 'UP';
+      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') direction = 'DOWN';
+      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') direction = 'LEFT';
+      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') direction = 'RIGHT';
+
+      if (direction) {
+        e.preventDefault();
+        setKeyboardFocusNode((prev) => getNextNodeByDirection(prev, direction));
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (keyboardFocusNode !== null) {
+          executePlaceOrMove(keyboardFocusNode);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentScreen, setupStep, winner, isAIMode, onlineGameId, myColor, turn, aiColor, keyboardFocusNode]);
+
+  // POMOĆNE METODE I LOGIKA
+  const fetchLeaderboard = async () => {
+    const data = await getLeaderboard();
+    setLeaderboard(data);
+  };
+
+  const totalMatches = profile.wins + profile.losses;
+  const winRate = totalMatches > 0 ? Math.round((profile.wins / totalMatches) * 100) : 0;
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfile((prev) => ({ ...prev, avatar: reader.result }));
+        setProfileTab('STATS');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const renderAvatar = (src) => {
+    if (src && (src.startsWith('data:image') || src.startsWith('http'))) {
+      return <img src={src} alt="Avatar" className="avatar-img" />;
+    }
+    return <span>{src || '🦁'}</span>;
+  };
+
+  const syncGameState = (nextBoard, nextTurn, extraUpdates = {}) => {
+    setBoard(nextBoard);
+    if (nextTurn) setTurn(nextTurn);
+
+    if (onlineGameId) {
+      updateDoc(doc(db, "games", onlineGameId), {
+        board: nextBoard,
+        ...(nextTurn ? { currentTurn: nextTurn } : {}),
+        ...extraUpdates
+      });
+    }
+  };
 
   const startCouchGame = () => {
     setIsAIMode(false);
@@ -397,7 +539,6 @@ export default function App() {
   };
 
   const handleProceedToCoinToss = async () => {
-    // 1. Učitaj ili kreiraj profil za prvog igrača u Firebaseu
     const p1Data = await getOrCreateProfile(p1Name);
     if (p1Data) {
       setProfile(prev => ({
@@ -409,12 +550,10 @@ export default function App() {
       }));
     }
 
-    // 2. Ako nije AI, registriraj/učitaj i drugog igrača
     if (!isAIMode && p2Name) {
       await getOrCreateProfile(p2Name);
     }
 
-    // 3. Prebaci na bacanje novčića
     setSetupStep('COIN_TOSS');
   };
 
@@ -438,9 +577,7 @@ export default function App() {
       setCoinResultText(isHeads ? t.heads : t.tails);
       setCoinWinner(winnerId);
 
-      // AKO IGRAŠ PROTIV AI I AI POBIJEDI NA NOVČIĆU (Igrač 2):
       if (isAIMode && winnerId === 2) {
-        // AI automatski bira bijele i igra prvi
         setPlayers({
           WHITE: { name: p2Name, id: 2 },
           BLACK: { name: p1Name, id: 1 }
@@ -453,15 +590,13 @@ export default function App() {
         setTurn('WHITE');
         setSetupStep('PLAY');
       } else {
-        // Inače čovjek bira boju
         setSetupStep('COLOR_SELECT');
       }
     }, 2500);
   };
 
   const handleColorSelect = (color) => {
-    // Ako čovjek bira boju (coinWinner === 1):
-    const p1ChosenColor = color; // 'WHITE' ili 'BLACK'
+    const p1ChosenColor = color;
     const p2ChosenColor = p1ChosenColor === 'WHITE' ? 'BLACK' : 'WHITE';
 
     setPlayers({
@@ -492,7 +627,6 @@ export default function App() {
 
     const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
 
-    // Ako igrač igra protiv AI-ja ili lokalno, okini odgovarajući zvuk:
     if (userColor) {
       const isUserWinner = winningColor === userColor;
       playAudioEffect(isUserWinner ? 'victory' : 'defeat', soundEnabled);
@@ -508,7 +642,6 @@ export default function App() {
 
     const today = new Date();
     const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
-
     const opponentName = isAIMode ? `AI (${aiDifficulty})` : (userColor === 'WHITE' ? players.BLACK.name : players.WHITE.name);
 
     const newMatch = {
@@ -520,7 +653,6 @@ export default function App() {
       category: gameCategory
     };
 
-    // 1. Lokalno ažuriranje profila (da sučelje odmah reagira)
     setProfile(prev => ({
       ...prev,
       points: newPoints,
@@ -529,10 +661,8 @@ export default function App() {
       matchHistory: [newMatch, ...prev.matchHistory.slice(0, 9)]
     }));
 
-    // 2. Trajno spremanje u Firebase bazu podataka
     saveMatchHistory(newMatch);
 
-    // Ako je natjecateljski mod protiv drugog igrača (nije AI), ažuriraj rang bodove obojici
     if (!isAIMode) {
       const winnerPlayer = isUserWinner ? profile.name : opponentName;
       const loserPlayer = isUserWinner ? opponentName : profile.name;
@@ -540,7 +670,6 @@ export default function App() {
     }
   };
 
-  // GLAVNA LOGIKA POTEZA
   const handleCancelSelection = () => {
     setSelectedNode(null);
     setActiveHeldPiece(null);
@@ -548,6 +677,9 @@ export default function App() {
 
   const executePlaceOrMove = (nodeIndex, customSource = null) => {
     if (winner) return;
+    // Zabrana poteza ako igramo online meč, a nije naš red
+    if (onlineGameId && turn !== myColor) return;
+
     const opponent = turn === 'WHITE' ? 'BLACK' : 'WHITE';
 
     // 1. FAZA UKLANJANJA FIGURA
@@ -571,42 +703,47 @@ export default function App() {
       setSelectedNode(null);
       setActiveHeldPiece(null);
 
-      // PROVJERA KRAJA IGRE
       if (unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3) {
         handleGameEnd(turn);
         return;
       }
 
-      // PREDAJA POTEZA PROTIVNIKU S BLAGOM ODGODOM (DA SE SPRIJEČI DVOSTRUKI KLIK NA ISTO POLJE)
       setTimeout(() => {
-        setTurn(opponent);
+        syncGameState(newBoard, opponent, { mustRemove: false });
       }, 50);
       return;
     }
 
     // 2. FAZA POSTAVLJANJA FIGURA IZ STALKA
-    // Postavljanje važi SAMO ako ima figura u stalku I ako igrač postavlja na prazno polje
     const isPlacingFromRack = activeHeldPiece && activeHeldPiece.type === 'RACK';
     if (unplaced[turn] > 0 || isPlacingFromRack) {
-      if (board[nodeIndex] !== null) return; // Može se postaviti samo na prazan čvor
+      if (board[nodeIndex] !== null) return;
 
       playAudioEffect('place', soundEnabled);
       const newBoard = [...board];
       newBoard[nodeIndex] = turn;
-      setBoard(newBoard);
-      setUnplaced(prev => ({ ...prev, [turn]: prev[turn] - 1 })); // Ovdje se troši figura iz stalka
+
+      const nextUnplaced = { ...unplaced, [turn]: unplaced[turn] - 1 };
+      setUnplaced(nextUnplaced);
+
       setActiveHeldPiece(null);
       setSelectedNode(null);
 
-      // Ako je složen mlin, aktiviramo fazu uklanjanja i ostajemo na istom igraču
       if (checkFormsMill(newBoard, nodeIndex, turn)) {
         setMustRemove(true);
+        syncGameState(newBoard, turn, {
+          mustRemove: true,
+          unplaced: nextUnplaced
+        });
       } else {
         if (!hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
           handleGameEnd(turn);
           return;
         }
-        setTurn(opponent);
+        syncGameState(newBoard, opponent, {
+          mustRemove: false,
+          unplaced: nextUnplaced
+        });
       }
       return;
     }
@@ -640,12 +777,13 @@ export default function App() {
 
         if (checkFormsMill(newBoard, nodeIndex, turn)) {
           setMustRemove(true);
+          syncGameState(newBoard, turn, { mustRemove: true });
         } else {
           if (!hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
             handleGameEnd(turn);
             return;
           }
-          setTurn(opponent);
+          syncGameState(newBoard, opponent, { mustRemove: false });
         }
       } else if (board[nodeIndex] === turn) {
         playAudioEffect('pickup', soundEnabled);
@@ -655,102 +793,14 @@ export default function App() {
     }
   };
 
-  // AI POTEZ AUTOMATIKA
-  useEffect(() => {
-    if (!isAIMode || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-
-    if (turn === aiColor) {
-      const timer = setTimeout(() => {
-        if (mustRemove) {
-          const targetNode = getAIPieceToRemove(board, turn === 'WHITE' ? 'BLACK' : 'WHITE', aiDifficulty);
-          if (targetNode !== null) {
-            executePlaceOrMove(targetNode);
-          }
-          return;
-        }
-
-        if (unplaced[aiColor] > 0) {
-          const targetNode = getAIPlacementNode(board, aiColor, aiDifficulty);
-          if (targetNode !== null) {
-            executePlaceOrMove(targetNode);
-          }
-          return;
-        }
-
-        const move = getAIMove(board, aiColor, aiDifficulty);
-        if (move) {
-          executePlaceOrMove(move.to, move.from);
-        } else {
-          // AI nema nijedan legalan potez -> čovjek pobjeđuje!
-          const humanPlayer = aiColor === 'WHITE' ? 'BLACK' : 'WHITE';
-          handleGameEnd(humanPlayer);
-        }
-      }, 500);
-
-      return () => clearTimeout(timer);
-
-    }
-
-  }, [turn, mustRemove, board, unplaced, isAIMode, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
-
-  // ŠAHOVSKI SAT (ODBROJAVANJE VREMENA)
-  useEffect(() => {
-    if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        const currentTime = prev[turn];
-        if (currentTime === null || currentTime === undefined) return prev;
-
-        if (currentTime <= 1) {
-          clearInterval(timer);
-          // Igraču na potezu je isteklo vrijeme -> protivnik pobjeđuje!
-          const winningColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
-          handleGameEnd(winningColor);
-          return { ...prev, [turn]: 0 };
-        }
-        return { ...prev, [turn]: currentTime - 1 };
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [gameCategory, currentScreen, setupStep, winner, turn]);
-
-  // KONTROLA IGRE TIPKOVNICOM (WASD + STRELICE + ENTER / SPACE)
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-      if (isAIMode && turn === aiColor) return;
-
-      let direction = null;
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') direction = 'UP';
-      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') direction = 'DOWN';
-      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') direction = 'LEFT';
-      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') direction = 'RIGHT';
-
-      if (direction) {
-        e.preventDefault();
-        setKeyboardFocusNode((prev) => getNextNodeByDirection(prev, direction));
-      } else if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        if (keyboardFocusNode !== null) {
-          executePlaceOrMove(keyboardFocusNode);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentScreen, setupStep, winner, isAIMode, turn, aiColor, keyboardFocusNode, executePlaceOrMove]);
-
   const opponentColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
-  // Formatiranje sekundi u MM:SS prikaz
   const formatTime = (seconds) => {
     if (seconds === null || seconds === undefined) return '--:--';
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
+
   const opponentNodes = board.map((val, idx) => val === opponentColor ? idx : null).filter(val => val !== null);
   const opponentNotInMill = opponentNodes.filter(idx => !isPieceInMill(board, idx, opponentColor));
 
@@ -803,7 +853,6 @@ export default function App() {
               <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('en'); }}>EN</button>
             </div>
           </div>
-          {/* 👇 CENTRIRANI ADMIN GUMB IZNAD 4x2 MREŽE */}
           <div style={{ display: 'flex', justifyContent: 'center', margin: '0 0 16px 0' }}>
             <button
               type="button"
@@ -1070,7 +1119,6 @@ export default function App() {
                       <input type="text" maxLength={12} value={p2Name} disabled={isAIMode} onChange={(e) => setP2Name(e.target.value)} />
                     </div>
 
-                    {/* ODABIR KATEGORIJE: CASUAL ILI NATJECATELJSKI */}
                     <div className="game-mode-selector">
                       <div className="mode-toggle-group">
                         <button
@@ -1114,7 +1162,6 @@ export default function App() {
                           </button>
                         </div>
                       )}
-
                     </div>
                     <button className="btn-gold" onClick={handleProceedToCoinToss}>{t.btnNextCoin}</button>
                     <br />
@@ -1165,7 +1212,6 @@ export default function App() {
                       {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
                     </div>
                     {mustRemove && <div className="status-alert">{t.alertRemove}</div>}
-                    {/* DIGITALNI ŠAHOVSKI SATOVI */}
                     {gameCategory === 'COMPETITIVE' && (
                       <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0' }}>
                         <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{
@@ -1196,7 +1242,6 @@ export default function App() {
                       </div>
                     )}
                   </>
-
                 )}
                 <button className="btn-menu btn-back" style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }} onClick={() => setCurrentScreen('MAIN_MENU')}>
                   {t.btnQuit}
@@ -1204,7 +1249,7 @@ export default function App() {
               </div>
 
               <div className="main-play-area">
-                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 1 (POKRAJ NJEGOVOG LIJEVOG STALKA) */}
+                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 1 */}
                 <div className="captured-tray tray-left">
                   {Array.from({ length: p1CapturedCount }).map((_, i) => (
                     <div
@@ -1214,13 +1259,13 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* LIJEVI STALAK: UVIJEK IGRAČ 1 */}
+                {/* LIJEVI STALAK: IGRAČ 1 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title">{p1Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p1Color];
-                      const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color);
+                      const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color) && (!onlineGameId || turn === myColor);
 
                       return (
                         <div
@@ -1248,12 +1293,12 @@ export default function App() {
                   removableNodes={removableNodes}
                   mustRemove={mustRemove}
                   turn={turn}
-                  isAIMode={isAIMode}
+                  isAIMode={onlineGameId ? false : isAIMode}
                   aiColor={aiColor}
                   focusedNode={keyboardFocusNode}
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
-                    // Ako klikneš na već odabrano polje, poništi selekciju
+                    if (onlineGameId && turn !== myColor) return;
                     if (selectedNode === targetIdx) {
                       handleCancelSelection();
                       return;
@@ -1262,11 +1307,11 @@ export default function App() {
                     executePlaceOrMove(targetIdx);
                   }}
                   onNodePick={(nodeIdx) => {
+                    if (onlineGameId && turn !== myColor) return;
                     if (mustRemove) {
                       executePlaceOrMove(nodeIdx);
                       return;
                     }
-                    // Ako ponovno klikneš istu figuru koju držiš -> ostavi je (deselect)
                     if (selectedNode === nodeIdx) {
                       handleCancelSelection();
                       return;
@@ -1278,13 +1323,13 @@ export default function App() {
                   }}
                 />
 
-                {/* DESNI STALAK: UVIJEK IGRAČ 2 */}
+                {/* DESNI STALAK: IGRAČ 2 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p2Color];
-                      const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color);
+                      const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color) && (!onlineGameId || turn === myColor);
 
                       return (
                         <div
@@ -1304,7 +1349,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 2 (POKRAJ NJEGOVOG DESNOG STALKA) */}
+                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 2 */}
                 <div className="captured-tray tray-right">
                   {Array.from({ length: p2CapturedCount }).map((_, i) => (
                     <div
@@ -1314,12 +1359,10 @@ export default function App() {
                   ))}
                 </div>
               </div>
-
             </>
           )}
         </>
-      )
-      }
-    </div >
+      )}
+    </div>
   );
 }
