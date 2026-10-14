@@ -344,6 +344,16 @@ export default function App() {
         if (data.currentTurn) setTurn(data.currentTurn);
         if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
         if (data.unplaced) setUnplaced(data.unplaced);
+
+        // Sinkroniziraj status pobjednika na oba ekrana:
+        if (data.winner && !winner) {
+          setWinner(data.winner);
+          const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
+          if (userColor) {
+            playAudioEffect(data.winner === userColor ? 'victory' : 'defeat', soundEnabled);
+          }
+        }
+
         if (data.playerWhite && data.playerBlack) {
           const whiteName = typeof data.playerWhite === 'object' ? (data.playerWhite.name || 'Bijeli') : data.playerWhite;
           const blackName = typeof data.playerBlack === 'object' ? (data.playerBlack.name || 'Crni') : data.playerBlack;
@@ -625,6 +635,12 @@ export default function App() {
   const handleGameEnd = (winningColor) => {
     setWinner(winningColor);
 
+    // Sinkroniziraj pobjedu s Firebaseom kako bi oba igrača vidjela kraj:
+    if (onlineGameId) {
+      updateDoc(doc(db, "games", onlineGameId), {
+        winner: winningColor
+      });
+    }
     const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
 
     if (userColor) {
@@ -703,11 +719,18 @@ export default function App() {
       setSelectedNode(null);
       setActiveHeldPiece(null);
 
-      if (unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3) {
+      // PROVJERA KRAJA IGRE
+      const isOpponentDefeated = unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3;
+
+      if (isOpponentDefeated) {
+        // 1. Prvo pošalji ploču s uklonjenom figurom u bazu
+        syncGameState(newBoard, turn, { mustRemove: false, winner: turn });
+        // 2. Zatim pokreni lokalnu rutinu završetka meča
         handleGameEnd(turn);
         return;
       }
 
+      // AKO IGRA JOŠ TRAJE, PREDAJ POTEZ PROTIVNIKU
       setTimeout(() => {
         syncGameState(newBoard, opponent, { mustRemove: false });
       }, 50);
@@ -736,7 +759,9 @@ export default function App() {
           unplaced: nextUnplaced
         });
       } else {
-        if (!hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
+        // Provjera legalnih poteza vrijedi TEK u 2. fazi igre (kad su sve figure na ploči)
+        const isPlacementPhaseOver = nextUnplaced.WHITE === 0 && nextUnplaced.BLACK === 0;
+        if (isPlacementPhaseOver && !hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
           handleGameEnd(turn);
           return;
         }
