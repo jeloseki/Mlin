@@ -1,7 +1,16 @@
 // src/AdminPanel.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { quickMatch } from './services/multiplayer';
+import {
+  getCategories,
+  addCategory,
+  deleteCategory,
+  getItemsByCategory,
+  addItemToCategory,
+  deleteItem,
+  seedDefaultCategories
+} from './categoryService';
 
 const AVATAR_OPTIONS = ['🦁', '🧙‍♂️', '⚡', '🌙', '🎨', '🕹️', '❄️', '🤫', '🚀', '🌟', '☕', '🐱', '🤖', '🦊', '🦉', '🎯'];
 
@@ -193,7 +202,7 @@ const ALL_COUNTRIES = [
   { code: 'GB', name: 'Velika Britanija', flag: '🇬🇧' },
   { code: 'US', name: 'SAD', flag: '🇺🇸' },
   { code: 'UY', name: 'Urugvaj', flag: '🇺🇾' },
-  { code: 'UZ', name: 'Uzbekistan', flag: '🇺🇿' },
+  { code: 'UZ', name: 'Uzbekistan', flag: 'UZ' },
   { code: 'VU', name: 'Vanuatu', flag: '🇻🇺' },
   { code: 'VA', name: 'Vatikan', flag: '🇻🇦' },
   { code: 'VE', name: 'Venezuela', flag: '🇻🇪' },
@@ -220,7 +229,6 @@ const CountryFlag = ({ code, size = '16x12' }) => {
         display: 'inline-block'
       }}
       onError={(e) => {
-        // Fallback ako kod ne postoji
         e.target.style.display = 'none';
       }}
     />
@@ -243,27 +251,80 @@ export default function AdminPanel() {
 
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
 
-  const handleStartOnlineMatch = (selectedProfile = null) => {
-    setIsSearchingMatch(true);
+  // --- STANJA ZA KATEGORIJE (1:N) ---
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [categoryItems, setCategoryItems] = useState([]);
 
-    // Ako je proslijeđen profil s kartice koristi njega, inače dohvati aktivni
-    const profileToUse = selectedProfile || JSON.parse(localStorage.getItem('mlin_user_profile')) || {
-      name: name.trim() || 'Igrač',
-      country: country || 'HR',
-      avatar: avatar || '🦊'
-    };
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [newItemLabel, setNewItemLabel] = useState('');
+  const [newItemValue, setNewItemValue] = useState('');
 
-    quickMatch(
-      profileToUse,
-      (gameId, myColor) => {
-        setIsSearchingMatch(false);
-        sessionStorage.setItem('mlin_my_color', myColor);
-        navigate(`/game/${gameId}`);
-      },
-      (gameId) => {
-        console.log("Čekamo protivnika u sobi:", gameId);
-      }
-    );
+  // --- EFEKTI ZA DOHVAT KATEGORIJA I STAVKI (1:N) ---
+  const loadCategories = async () => {
+    const data = await getCategories();
+    setCategories(data);
+    if (data.length > 0 && !selectedCategory) {
+      setSelectedCategory(data[0]);
+    }
+  };
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadItems = async (catId) => {
+    const items = await getItemsByCategory(catId);
+    setCategoryItems(items);
+  };
+
+  useEffect(() => {
+    if (selectedCategory) {
+      loadItems(selectedCategory.id);
+    } else {
+      setCategoryItems([]);
+    }
+  }, [selectedCategory]);
+
+  // --- FUNKCIJE ZA UPRAVLJANJE KATEGORIJAMA ---
+  const handleAddCategory = async (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    await addCategory({ name: newCatName, description: newCatDesc });
+    setNewCatName('');
+    setNewCatDesc('');
+    await loadCategories();
+  };
+
+  const handleAddItem = async (e) => {
+    e.preventDefault();
+    if (!newItemLabel.trim() || !selectedCategory) return;
+    await addItemToCategory(selectedCategory.id, {
+      label: newItemLabel,
+      value: newItemValue
+    });
+    setNewItemLabel('');
+    setNewItemValue('');
+    await loadItems(selectedCategory.id);
+  };
+
+  const handleDeleteCategory = async (id) => {
+    await deleteCategory(id);
+    setSelectedCategory(null);
+    await loadCategories();
+  };
+
+  const handleDeleteItem = async (itemId) => {
+    await deleteItem(selectedCategory.id, itemId);
+    await loadItems(selectedCategory.id);
+  };
+
+  const handleSeedDefaults = async () => {
+    if (window.confirm("Želite li generirati zadane kategorije i stavke?")) {
+      await seedDefaultCategories();
+      await loadCategories();
+    }
   };
 
   const [profiles, setProfiles] = useState(() => {
@@ -326,6 +387,29 @@ export default function AdminPanel() {
 
     localStorage.setItem('mlin_user_profile', JSON.stringify(activeProfile));
     navigate('/');
+  };
+
+  // --- ONLINE TRAŽENJE MEČA (Ispravno zatvorena funkcija) ---
+  const handleStartOnlineMatch = (selectedProfile = null) => {
+    setIsSearchingMatch(true);
+
+    const profileToUse = selectedProfile || JSON.parse(localStorage.getItem('mlin_user_profile')) || {
+      name: name.trim() || 'Igrač',
+      country: country || 'HR',
+      avatar: avatar || '🦊'
+    };
+
+    quickMatch(
+      profileToUse,
+      (gameId, myColor) => {
+        setIsSearchingMatch(false);
+        sessionStorage.setItem('mlin_my_color', myColor);
+        navigate(`/game/${gameId}`);
+      },
+      (gameId) => {
+        console.log("Čekamo protivnika u sobi:", gameId);
+      }
+    );
   };
 
   const handleStartEdit = (e, player) => {
@@ -646,7 +730,6 @@ export default function AdminPanel() {
               </label>
 
               <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center' }}>
-                {/* Zastava smještena unutar samog input polja */}
                 <div style={{
                   position: 'absolute',
                   left: '10px',
@@ -678,7 +761,7 @@ export default function AdminPanel() {
                   }}
                   style={{
                     width: '100%',
-                    padding: '8px 10px 8px 38px', // padding-left 38px ostavlja točno mjesta za zastavicu
+                    padding: '8px 10px 8px 38px',
                     borderRadius: '6px',
                     backgroundColor: '#0f172a',
                     border: '1px solid #475569',
@@ -907,21 +990,9 @@ export default function AdminPanel() {
 
               <span style={{ fontSize: '2rem' }}>{p.avatar}</span>
               <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc' }}>
-
-                  <span style={{ fontSize: '1rem', marginLeft: '2px' }} title={p.country}>
-                    <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>{p.name}</span>
-                      <CountryFlag code={p.country} size="20x15" />
-                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({p.country})</span>
-                      {isIvica && (
-                        <span style={{ marginLeft: '6px', fontSize: '0.7rem', color: '#38bdf8', border: '1px solid #38bdf8', padding: '1px 4px', borderRadius: '4px' }}>
-                          ADMIN
-                        </span>
-                      )}
-                    </div>
-
-                  </span>{' '}
+                <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>{p.name}</span>
+                  <CountryFlag code={p.country} size="20x15" />
                   <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({p.country})</span>
                   {isIvica && (
                     <span style={{ marginLeft: '6px', fontSize: '0.7rem', color: '#38bdf8', border: '1px solid #38bdf8', padding: '1px 4px', borderRadius: '4px' }}>
@@ -986,6 +1057,160 @@ export default function AdminPanel() {
           );
         })}
       </div>
+
+      {/* ========================================================== */}
+      {/* 👇 NOVA SEKCIJA: UPRAVLJANJE KATEGORIJAMA (1:N VEZA)      */}
+      {/* ========================================================== */}
+      <div style={{ marginTop: '40px', padding: '24px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          
+          <h2 style={{ color: '#fbbf24', margin: 0 }}>🗂️ Upravljanje Kategorijama i Postavkama </h2>
+          <button
+            type="button"
+            onClick={handleSeedDefaults}
+            style={{
+              backgroundColor: '#059669',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: 'bold',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            ✨ Učitaj početne kategorije (Seed)
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px' }}>
+
+          {/* LIJEVI STUPAC: 1 - Popis Kategorija */}
+          <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
+            <h3 style={{ color: '#e2e8f0', marginTop: 0, fontSize: '1.1rem' }}>Kategorije (1)</h3>
+
+            <form onSubmit={handleAddCategory} style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input
+                type="text"
+                placeholder="Naziv kategorije..."
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                style={{ padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
+              />
+              <input
+                type="text"
+                placeholder="Opis kategorije..."
+                value={newCatDesc}
+                onChange={(e) => setNewCatDesc(e.target.value)}
+                style={{ padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
+              />
+              <button type="submit" style={{ padding: '8px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                + Dodaj Kategoriju
+              </button>
+            </form>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
+              {categories.map((cat) => (
+                <div
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat)}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: selectedCategory?.id === cat.id ? '#334155' : '#0f172a',
+                    border: selectedCategory?.id === cat.id ? '2px solid #fbbf24' : '1px solid #334155',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 'bold', color: '#fff' }}>{cat.name}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{cat.description}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }}
+                    style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* DESNI STUPAC: N - Stavke odabrane kategorije */}
+          <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
+            <h3 style={{ color: '#e2e8f0', marginTop: 0, fontSize: '1.1rem' }}>
+              Stavke unutar: <span style={{ color: '#38bdf8' }}>{selectedCategory ? selectedCategory.name : 'Nije odabrano'}</span> (N)
+            </h3>
+
+            {selectedCategory ? (
+              <>
+                <form onSubmit={handleAddItem} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                  <input
+                    type="text"
+                    placeholder="Naziv stavke (npr. Blitz 45s)..."
+                    value={newItemLabel}
+                    onChange={(e) => setNewItemLabel(e.target.value)}
+                    style={{ flex: 2, padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Vrijednost (npr. 45)..."
+                    value={newItemValue}
+                    onChange={(e) => setNewItemValue(e.target.value)}
+                    style={{ flex: 1, padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
+                  />
+                  <button type="submit" style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                    + Dodaj
+                  </button>
+                </form>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
+                  {categoryItems.length === 0 ? (
+                    <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '8px' }}>Ova kategorija još nema definiranih stavki.</div>
+                  ) : (
+                    categoryItems.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          padding: '10px 14px',
+                          background: '#0f172a',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          border: '1px solid #334155'
+                        }}
+                      >
+                        <span style={{ color: '#fff', fontWeight: '500' }}>{item.label} <small style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.value})</small></span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteItem(item.id)}
+                          style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            ) : (
+              <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>Odaberite kategoriju s lijeve strane za prikaz njezinih elemenata.</p>
+            )}
+          </div>
+
+        </div>
+      </div>
+      {/* 👆 KRAJ NOVE SEKCIJE */}
+
     </div>
   );
 }
