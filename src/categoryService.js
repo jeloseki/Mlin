@@ -127,3 +127,29 @@ export const seedDefaultCategories = async () => {
     }
   }
 };
+
+// 8. Uređivanje postojeće kategorije
+export const updateCategory = async (categoryId, data) => {
+  try {
+    const catRef = doc(db, CATEGORIES_COLLECTION, categoryId);
+    return await updateDoc(catRef, {
+      ...data,
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error("Greška pri ažuriranju kategorije:", error);
+  }
+};
+
+// 9. Uređivanje postojeće stavke
+export const updateItem = async (categoryId, itemId, data) => {
+  try {
+    const itemRef = doc(db, CATEGORIES_COLLECTION, categoryId, 'items', itemId);
+    return await updateDoc(itemRef, {
+      ...data,
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error("Greška pri ažuriranju stavke:", error);
+  }
+};

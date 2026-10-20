@@ -9,7 +9,9 @@ import {
   getItemsByCategory,
   addItemToCategory,
   deleteItem,
-  seedDefaultCategories
+  seedDefaultCategories,
+  updateCategory,
+  updateItem
 } from './categoryService';
 
 const AVATAR_OPTIONS = ['🦁', '🧙‍♂️', '⚡', '🌙', '🎨', '🕹️', '❄️', '🤫', '🚀', '🌟', '☕', '🐱', '🤖', '🦊', '🦉', '🎯'];
@@ -243,7 +245,8 @@ const DEFAULT_IVICA = {
   bio: 'Glavni developer i strateg igre',
   points: 0,
   wins: 0,
-  losses: 0
+  losses: 0,
+  prilagodba: null
 };
 
 export default function AdminPanel() {
@@ -252,6 +255,9 @@ export default function AdminPanel() {
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
 
   // --- STANJA ZA KATEGORIJE (1:N) ---
+  // Mapa koja drži stavke za svaku kategoriju { [catId]: [items...] }
+  const [allItemsMap, setAllItemsMap] = useState({});
+
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categoryItems, setCategoryItems] = useState([]);
@@ -261,6 +267,19 @@ export default function AdminPanel() {
   const [newItemLabel, setNewItemLabel] = useState('');
   const [newItemValue, setNewItemValue] = useState('');
 
+  // Stanja za uređivanje kategorije
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatDesc, setEditCatDesc] = useState('');
+
+  // Stanja za uređivanje stavke
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editItemLabel, setEditItemLabel] = useState('');
+  const [editItemValue, setEditItemValue] = useState('');
+
+  // Način sortiranja kategorija: 'created' (kako su stvarane) ili 'alpha' (abecedno A-Z)
+  const [categorySortBy, setCategorySortBy] = useState('created');
+
   // --- EFEKTI ZA DOHVAT KATEGORIJA I STAVKI (1:N) ---
   const loadCategories = async () => {
     const data = await getCategories();
@@ -268,6 +287,14 @@ export default function AdminPanel() {
     if (data.length > 0 && !selectedCategory) {
       setSelectedCategory(data[0]);
     }
+
+    // Povuci stavke za svaku kategoriju u pozadini
+    const map = {};
+    for (const cat of data) {
+      const items = await getItemsByCategory(cat.id);
+      map[cat.id] = items;
+    }
+    setAllItemsMap(map);
   };
 
   useEffect(() => {
@@ -286,6 +313,7 @@ export default function AdminPanel() {
       setCategoryItems([]);
     }
   }, [selectedCategory]);
+
 
   // --- FUNKCIJE ZA UPRAVLJANJE KATEGORIJAMA ---
   const handleAddCategory = async (e) => {
@@ -325,6 +353,50 @@ export default function AdminPanel() {
       await seedDefaultCategories();
       await loadCategories();
     }
+  };
+
+  // --- UREĐIVANJE KATEGORIJE ---
+  const handleStartEditCategory = (e, cat) => {
+    e.stopPropagation();
+    setEditingCategoryId(cat.id);
+    setEditCatName(cat.name);
+    setEditCatDesc(cat.description || '');
+  };
+
+  const handleSaveEditCategory = async (e, catId) => {
+    e.stopPropagation();
+    if (!editCatName.trim()) return;
+    await updateCategory(catId, { name: editCatName, description: editCatDesc });
+    setEditingCategoryId(null);
+    await loadCategories();
+    if (selectedCategory?.id === catId) {
+      setSelectedCategory(prev => ({ ...prev, name: editCatName, description: editCatDesc }));
+    }
+  };
+
+  // Sortiranje kategorija
+  const sortedCategories = [...categories].sort((a, b) => {
+    if (categorySortBy === 'alpha') {
+      return (a.name || '').localeCompare(b.name || '', 'hr', { sensitivity: 'base' });
+    }
+    // Zadano: po vremenu stvaranja (od najstarijih prema najnovijima ili po createdAt)
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
+  // --- UREĐIVANJE STAVKE ---
+  const handleStartEditItem = (e, item) => {
+    e.stopPropagation();
+    setEditingItemId(item.id);
+    setEditItemLabel(item.label);
+    setEditItemValue(item.value || '');
+  };
+
+  const handleSaveEditItem = async (e, itemId) => {
+    e.stopPropagation();
+    if (!editItemLabel.trim() || !selectedCategory) return;
+    await updateItem(selectedCategory.id, itemId, { label: editItemLabel, value: editItemValue });
+    setEditingItemId(null);
+    await loadItems(selectedCategory.id);
   };
 
   const [profiles, setProfiles] = useState(() => {
@@ -382,11 +454,49 @@ export default function AdminPanel() {
       points: player.points || 0,
       wins: player.wins || 0,
       losses: player.losses || 0,
-      matchHistory: []
+      matchHistory: [],
+      prilagodba: player.prilagodba || {}
     };
 
     localStorage.setItem('mlin_user_profile', JSON.stringify(activeProfile));
     navigate('/');
+  };
+
+  const handleSetSinglePrilagodba = (profileId, catId, itemVal) => {
+    const targetCat = categories.find(c => c.id === catId);
+
+    const updated = profiles.map(p => {
+      if (p.id === profileId) {
+        if (!catId) {
+          return { ...p, prilagodba: null };
+        }
+        return {
+          ...p,
+          prilagodba: {
+            kategorijaId: catId,
+            kategorijaNaziv: targetCat ? targetCat.name : '',
+            stavka: itemVal || ''
+          }
+        };
+      }
+      return p;
+    });
+
+    setProfiles(updated);
+    localStorage.setItem('mlin_admin_profiles', JSON.stringify(updated));
+
+    // Ažuriraj i aktivni profil ako je trenutno odabran
+    const active = localStorage.getItem('mlin_user_profile');
+    if (active) {
+      const parsed = JSON.parse(active);
+      const target = updated.find(p => p.id === profileId);
+      if (target && (parsed.name === target.name || profileId === 'admin-ivica')) {
+        localStorage.setItem('mlin_user_profile', JSON.stringify({
+          ...parsed,
+          prilagodba: target.prilagodba
+        }));
+      }
+    }
   };
 
   // --- ONLINE TRAŽENJE MEČA (Ispravno zatvorena funkcija) ---
@@ -480,7 +590,8 @@ export default function AdminPanel() {
         country: finalCountry,
         points: 0,
         wins: 0,
-        losses: 0
+        losses: 0,
+        prilagodba: null
       };
 
       const updated = [...profiles, newProfile];
@@ -955,15 +1066,16 @@ export default function AdminPanel() {
               }}
               style={{
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'stretch',
+                justifyContent: 'space-between',
                 gap: '12px',
-                padding: '12px',
+                padding: '14px',
                 backgroundColor: isSelected
                   ? '#450a0a'
                   : isBeingEdited
                     ? '#292524'
                     : (isIvica ? '#1e3a5f' : '#1e293b'),
-                borderRadius: '8px',
+                borderRadius: '10px',
                 border: isSelected
                   ? '1px solid #ef4444'
                   : isBeingEdited
@@ -971,83 +1083,232 @@ export default function AdminPanel() {
                     : (isIvica ? '1px solid #38bdf8' : '1px solid #334155'),
                 cursor: (isDeleteMode && isIvica) ? 'default' : 'pointer',
                 opacity: (isDeleteMode && isIvica) ? 0.6 : 1,
-                userSelect: 'none'
+                userSelect: 'none',
+                boxSizing: 'border-box',
+                minHeight: '135px'
               }}
             >
               {isDeleteMode && !isIvica && (
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  readOnly
-                  style={{
-                    width: '18px',
-                    height: '18px',
-                    cursor: 'pointer',
-                    pointerEvents: 'none'
-                  }}
-                />
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    readOnly
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      cursor: 'pointer',
+                      pointerEvents: 'none'
+                    }}
+                  />
+                </div>
               )}
 
-              <span style={{ fontSize: '2rem' }}>{p.avatar}</span>
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>{p.name}</span>
-                  <CountryFlag code={p.country} size="20x15" />
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({p.country})</span>
-                  {isIvica && (
-                    <span style={{ marginLeft: '6px', fontSize: '0.7rem', color: '#38bdf8', border: '1px solid #38bdf8', padding: '1px 4px', borderRadius: '4px' }}>
-                      ADMIN
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#cbd5e1', fontStyle: 'italic', margin: '2px 0' }}>
-                  "{p.bio}"
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                  {p.points || 0} bodova | {p.wins || 0}W - {p.losses || 0}L
-                </div>
+              {/* LIJEVA STRANA: Avatar */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', paddingTop: '2px' }}>
+                <span style={{ fontSize: '2.2rem', lineHeight: 1 }}>{p.avatar}</span>
               </div>
 
-              {!isDeleteMode && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {/* SREDINA: Podaci o igraču i prilagodba (fleksibilno, ne gura dugmad) */}
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'left', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }} title={p.name}>
+                      {p.name}
+                    </span>
+                    <CountryFlag code={p.country} size="20x15" />
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({p.country})</span>
+                    {isIvica && (
+                      <span style={{ fontSize: '0.65rem', color: '#38bdf8', border: '1px solid #38bdf8', padding: '1px 4px', borderRadius: '4px', fontWeight: 'bold' }}>
+                        ADMIN
+                      </span>
+                    )}
+                  </div>
 
+                  <div style={{ fontSize: '0.75rem', color: '#cbd5e1', fontStyle: 'italic', margin: '3px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.bio}>
+                    "{p.bio}"
+                  </div>
+
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                    {p.points || 0} bodova | {p.wins || 0}W - {p.losses || 0}L
+                  </div>
+                </div>
+
+                {/* PRILAGODBA: Kompaktno i stabilno */}
+                {categories.length > 0 && !isDeleteMode && (
+                  <div
+                    style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #334155' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '0.68rem', color: '#fbbf24', fontWeight: 'bold' }}>🎯 Prilagodba:</span>
+                      {p.prilagodba && (
+                        <button
+                          type="button"
+                          title="Ukloni prilagodbu"
+                          onClick={() => handleSetSinglePrilagodba(p.id, null, null)}
+                          style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.65rem', padding: 0 }}
+                        >
+                          ✕ Ukloni
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {/* 1. Izbor kategorije */}
+                      <select
+                        value={p.prilagodba?.kategorijaId || ''}
+                        onChange={(e) => {
+                          const catId = e.target.value;
+                          if (catId) {
+                            handleSetSinglePrilagodba(p.id, catId, '');
+                          } else {
+                            handleSetSinglePrilagodba(p.id, null, null);
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          backgroundColor: '#0f172a',
+                          color: '#fff',
+                          border: '1px solid #475569',
+                          borderRadius: '4px',
+                          fontSize: '0.68rem',
+                          padding: '3px 2px'
+                        }}
+                      >
+                        <option value="">-- Bez --</option>
+                        {categories.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+
+                      {/* 2. Izbor stavke */}
+                      {p.prilagodba?.kategorijaId && (
+                        <select
+                          value={p.prilagodba?.stavka || ''}
+                          onChange={(e) => handleSetSinglePrilagodba(p.id, p.prilagodba.kategorijaId, e.target.value)}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            backgroundColor: '#0f172a',
+                            color: '#10b981',
+                            border: '1px solid #10b981',
+                            borderRadius: '4px',
+                            fontSize: '0.68rem',
+                            padding: '3px 2px'
+                          }}
+                        >
+                          <option value="">-- Odaberi --</option>
+                          {(allItemsMap[p.prilagodba.kategorijaId] || []).map(it => (
+                            <option key={it.id} value={it.label}>{it.label}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* ZELENI AKTIVNI BEDŽ */}
+                    {p.prilagodba?.stavka && (
+                      <div style={{
+                        marginTop: '5px',
+                        fontSize: '0.68rem',
+                        color: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        display: 'block',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        Aktivno: <strong style={{ color: '#34d399' }}>{p.prilagodba.kategorijaNaziv}</strong> ➜ {p.prilagodba.stavka}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* DESNA STRANA: Fiksni stupac za dugmad (iste dimenzije, nikad ne bježe) */}
+              {!isDeleteMode && (
+                <div style={{
+                  width: '84px',
+                  minWidth: '84px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}>
+                  {/* Dugme Igraj */}
                   <button
                     type="button"
                     onClick={() => handleSelectProfile(p)}
-                    style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
+                    style={{
+                      width: '100%',
+                      height: '30px',
+                      backgroundColor: '#2563eb',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxSizing: 'border-box'
+                    }}
                   >
                     Igraj
                   </button>
 
-                  {/* NOVI GUMB: Desno od Igraj */}
+                  {/* Dugme Online */}
                   <button
                     type="button"
                     title="Pronađi online protivnika"
                     disabled={isSearchingMatch}
                     onClick={() => handleStartOnlineMatch(p)}
                     style={{
+                      width: '100%',
+                      height: '30px',
                       backgroundColor: isSearchingMatch ? '#475569' : '#8b5cf6',
                       color: '#fff',
                       border: 'none',
-                      padding: '5px 8px',
                       borderRadius: '6px',
                       cursor: isSearchingMatch ? 'not-allowed' : 'pointer',
                       fontSize: '0.75rem',
                       fontWeight: 'bold',
-                      display: 'inline-flex',
+                      display: 'flex',
                       alignItems: 'center',
-                      gap: '4px'
+                      justifyContent: 'center',
+                      gap: '3px',
+                      boxSizing: 'border-box'
                     }}
                   >
-                    {isSearchingMatch ? '⏳ Tražim...' : '⚡ Online'}
+                    {isSearchingMatch ? '⏳ Tražim' : '⚡ Online'}
                   </button>
 
-                  {/* Postojeći gumb Uredi profil */}
+                  {/* Dugme Uredi */}
                   <button
                     type="button"
                     title="Uredi profil"
                     onClick={(e) => handleStartEdit(e, p)}
-                    style={{ backgroundColor: '#475569', color: '#fbbf24', border: 'none', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem' }}
+                    style={{
+                      width: '100%',
+                      height: '30px',
+                      backgroundColor: '#334155',
+                      color: '#fbbf24',
+                      border: '1px solid #475569',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '3px',
+                      boxSizing: 'border-box'
+                    }}
                   >
                     ✏️ Uredi
                   </button>
@@ -1063,7 +1324,7 @@ export default function AdminPanel() {
       {/* ========================================================== */}
       <div style={{ marginTop: '40px', padding: '24px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          
+
           <h2 style={{ color: '#fbbf24', margin: 0 }}>🗂️ Upravljanje Kategorijama i Postavkama </h2>
           <button
             type="button"
@@ -1082,7 +1343,7 @@ export default function AdminPanel() {
               gap: '6px'
             }}
           >
-            ✨ Učitaj početne kategorije (Seed)
+            ✨ Učitaj početne kategorije
           </button>
         </div>
 
@@ -1090,7 +1351,29 @@ export default function AdminPanel() {
 
           {/* LIJEVI STUPAC: 1 - Popis Kategorija */}
           <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
-            <h3 style={{ color: '#e2e8f0', marginTop: 0, fontSize: '1.1rem' }}>Kategorije (1)</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ color: '#e2e8f0', margin: 0, fontSize: '1.1rem' }}>Kategorije</h3>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.55rem', color: '#94a3b8' }}></span>
+                <select
+                  value={categorySortBy}
+                  onChange={(e) => setCategorySortBy(e.target.value)}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    background: '#0f172a',
+                    color: '#fbbf24',
+                    border: '1px solid #475569',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="created">🕒 Po redu stvaranja</option>
+                  <option value="alpha">🔤 Abecedno (A - Z)</option>
+                </select>
+              </div>
+            </div>
 
             <form onSubmit={handleAddCategory} style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <input
@@ -1113,41 +1396,92 @@ export default function AdminPanel() {
             </form>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
-              {categories.map((cat) => (
-                <div
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat)}
-                  style={{
-                    padding: '10px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    background: selectedCategory?.id === cat.id ? '#334155' : '#0f172a',
-                    border: selectedCategory?.id === cat.id ? '2px solid #fbbf24' : '1px solid #334155',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 'bold', color: '#fff' }}>{cat.name}</div>
-                    <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{cat.description}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }}
-                    style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+              {sortedCategories.map((cat) => {
+                const isEditing = editingCategoryId === cat.id;
+
+                return (
+                  <div
+                    key={cat.id}
+                    onClick={() => !isEditing && setSelectedCategory(cat)}
+                    style={{
+                      padding: '10px',
+                      borderRadius: '6px',
+                      cursor: isEditing ? 'default' : 'pointer',
+                      background: selectedCategory?.id === cat.id ? '#334155' : '#0f172a',
+                      border: selectedCategory?.id === cat.id ? '2px solid #fbbf24' : '1px solid #334155',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
                   >
-                    ✕
-                  </button>
-                </div>
-              ))}
+                    {isEditing ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                        <input
+                          type="text"
+                          value={editCatName}
+                          onChange={(e) => setEditCatName(e.target.value)}
+                          style={{ padding: '6px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #fbbf24' }}
+                        />
+                        <input
+                          type="text"
+                          value={editCatDesc}
+                          onChange={(e) => setEditCatDesc(e.target.value)}
+                          style={{ padding: '6px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+                        />
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => handleSaveEditCategory(e, cat.id)}
+                            style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                          >
+                            💾 Spremi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setEditingCategoryId(null); }}
+                            style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                          >
+                            Odustani
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <div style={{ fontWeight: 'bold', color: '#fff' }}>{cat.name}</div>
+                          <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{cat.description}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            type="button"
+                            title="Uredi kategoriju"
+                            onClick={(e) => handleStartEditCategory(e, cat)}
+                            style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            title="Obriši kategoriju"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }}
+                            style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* DESNI STUPAC: N - Stavke odabrane kategorije */}
           <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
             <h3 style={{ color: '#e2e8f0', marginTop: 0, fontSize: '1.1rem' }}>
-              Stavke unutar: <span style={{ color: '#38bdf8' }}>{selectedCategory ? selectedCategory.name : 'Nije odabrano'}</span> (N)
+              Stavke unutar: <span style={{ color: '#38bdf8' }}>{selectedCategory ? selectedCategory.name : 'Nije odabrano'}</span>
             </h3>
 
             {selectedCategory ? (
@@ -1172,33 +1506,93 @@ export default function AdminPanel() {
                   </button>
                 </form>
 
+                {/* Popis stavki s podrškom za uređivanje (✏️) i brisanje (✕) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
                   {categoryItems.length === 0 ? (
-                    <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '8px' }}>Ova kategorija još nema definiranih stavki.</div>
+                    <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '8px' }}>
+                      Ova kategorija još nema definiranih stavki.
+                    </div>
                   ) : (
-                    categoryItems.map((item) => (
-                      <div
-                        key={item.id}
-                        style={{
-                          padding: '10px 14px',
-                          background: '#0f172a',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          border: '1px solid #334155'
-                        }}
-                      >
-                        <span style={{ color: '#fff', fontWeight: '500' }}>{item.label} <small style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.value})</small></span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteItem(item.id)}
-                          style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer' }}
+                    categoryItems.map((item) => {
+                      const isEditing = editingItemId === item.id;
+
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            padding: '10px 14px',
+                            background: '#0f172a',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            border: isEditing ? '1px solid #38bdf8' : '1px solid #334155',
+                            gap: '8px'
+                          }}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))
+                          {isEditing ? (
+                            /* --- PRIKAZ KAD JE U MODU UREĐIVANJA --- */
+                            <div style={{ display: 'flex', gap: '6px', width: '100%', alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                value={editItemLabel}
+                                onChange={(e) => setEditItemLabel(e.target.value)}
+                                placeholder="Naziv stavke..."
+                                style={{ flex: 2, padding: '6px 8px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #38bdf8' }}
+                              />
+                              <input
+                                type="text"
+                                value={editItemValue}
+                                onChange={(e) => setEditItemValue(e.target.value)}
+                                placeholder="Vrijednost..."
+                                style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+                              />
+                              <button
+                                type="button"
+                                title="Spremi promjene"
+                                onClick={(e) => handleSaveEditItem(e, item.id)}
+                                style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold' }}
+                              >
+                                💾
+                              </button>
+                              <button
+                                type="button"
+                                title="Odustani"
+                                onClick={(e) => { e.stopPropagation(); setEditingItemId(null); }}
+                                style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '0.85rem' }}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            /* --- NORMALAN PRIKAZ S GUMBIMA ✏️ I ✕ --- */
+                            <>
+                              <span style={{ color: '#fff', fontWeight: '500' }}>
+                                {item.label} <small style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.value})</small>
+                              </span>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  title="Uredi stavku"
+                                  onClick={(e) => handleStartEditItem(e, item)}
+                                  style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Obriši stavku"
+                                  onClick={() => handleDeleteItem(item.id)}
+                                  style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </>
