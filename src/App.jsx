@@ -319,6 +319,38 @@ export default function App() {
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
+  // Učitavanje pravila bodovanja (iz admin panela ili zadani niz)
+  const DEFAULT_SCORING_RULES = [
+    { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
+    { id: 'rule-loss', icon: '❌', title: 'Poraz', value: '-6 Bodova' },
+    { id: 'rule-mill', icon: '🎯', title: 'Mlin bonus', value: '+1 Bod po mlinu (Max +4 po meču)' },
+    { id: 'rule-dom', icon: '👑', title: 'Dominantna pobjeda (6+ figura)', value: '+3 Boda' },
+    { id: 'rule-streak', icon: '🔥', title: 'Niz pobjeda (3+ pobjede u nizu)', value: '+3 Boda' },
+    { id: 'rule-prot', icon: '🛡️', title: 'Zaštita', value: 'Bodovi ne mogu pasti ispod 0' }
+  ];
+
+  const [activeScoringRules, setActiveScoringRules] = useState(() => {
+    const saved = localStorage.getItem('mlin_scoring_rules');
+    return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
+  });
+
+  useEffect(() => {
+    const refreshRules = () => {
+      const saved = localStorage.getItem('mlin_scoring_rules');
+      if (saved) {
+        try {
+          setActiveScoringRules(JSON.parse(saved));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+
+    refreshRules();
+    window.addEventListener('storage', refreshRules);
+    return () => window.removeEventListener('storage', refreshRules);
+  }, [currentScreen]);
+
   // 1. Sinkronizacija profila u localStorage
   useEffect(() => {
     localStorage.setItem('mlin_user_profile', JSON.stringify(profile));
@@ -1094,19 +1126,22 @@ export default function App() {
         </div>
       )}
 
-      {/* BODOVANJE */}
+      {/* BODOVANJE - DINAMIČKI PRIKAZ IZ ADMIN PANELA */}
       {currentScreen === 'SCORING' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.scoringTitle}</h2>
-          <div className="info-box">
-            <div className="info-item"><span>{t.winPointsRule}</span></div>
-            <div className="info-item"><span>{t.lossPointsRule}</span></div>
-            <div className="info-item"><span>{t.millBonusRule}</span></div>
-            <div className="info-item"><span>{t.domWinRule}</span></div>
-            <div className="info-item"><span>{t.streakRule}</span></div>
-            <div className="info-item"><span>{t.protectionRule}</span></div>
+          <div className="info-box" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
+            {activeScoringRules.map((rule) => (
+              <div key={rule.id} className="info-item" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.1rem' }}>{rule.icon}</span>
+                <span style={{ fontWeight: 'bold' }}>{rule.title}:</span>
+                <span style={{ color: '#94a3b8' }}>{rule.value}</span>
+              </div>
+            ))}
           </div>
-          <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
+          <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>
+            {t.back}
+          </button>
         </div>
       )}
 

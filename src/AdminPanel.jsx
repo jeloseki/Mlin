@@ -254,6 +254,75 @@ export default function AdminPanel() {
 
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
 
+// Editiranje bodovanja - LOGIKA
+  const DEFAULT_SCORING_RULES = [
+    { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
+    { id: 'rule-loss', icon: '❌', title: 'Poraz', value: '-6 Bodova' },
+    { id: 'rule-mill', icon: '🎯', title: 'Mlin bonus', value: '+1 Bod po mlinu (Max +4 po meču)' },
+    { id: 'rule-dom', icon: '👑', title: 'Dominantna pobjeda (6+ figura)', value: '+3 Boda' },
+    { id: 'rule-streak', icon: '🔥', title: 'Niz pobjeda (3+ pobjede u nizu)', value: '+3 Boda' },
+    { id: 'rule-prot', icon: '🛡️', title: 'Zaštita', value: 'Bodovi ne mogu pasti ispod 0' }
+  ];
+
+  const [scoringRules, setScoringRules] = useState(() => {
+    const saved = localStorage.getItem('mlin_scoring_rules');
+    return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
+  });
+
+  const [newRuleIcon, setNewRuleIcon] = useState('⭐');
+  const [newRuleTitle, setNewRuleTitle] = useState('');
+  const [newRuleValue, setNewRuleValue] = useState('');
+  const [editingRuleId, setEditingRuleId] = useState(null);
+  const [editRuleTitle, setEditRuleTitle] = useState('');
+  const [editRuleValue, setEditRuleValue] = useState('');
+  const [editRuleIcon, setEditRuleIcon] = useState('');
+
+  const saveRulesToStorage = (rules) => {
+    setScoringRules(rules);
+    localStorage.setItem('mlin_scoring_rules', JSON.stringify(rules));
+  };
+
+  const handleResetScoringRules = () => {
+    saveRulesToStorage(DEFAULT_SCORING_RULES);
+  };
+
+  const handleAddRule = (e) => {
+    e.preventDefault();
+    if (!newRuleTitle.trim() || !newRuleValue.trim()) return;
+    const newRule = {
+      id: 'rule-' + Date.now(),
+      icon: newRuleIcon || '⭐',
+      title: newRuleTitle.trim(),
+      value: newRuleValue.trim()
+    };
+    saveRulesToStorage([...scoringRules, newRule]);
+    setNewRuleTitle('');
+    setNewRuleValue('');
+  };
+
+  const handleDeleteRule = (id) => {
+    const updated = scoringRules.filter(r => r.id !== id);
+    saveRulesToStorage(updated);
+  };
+
+  const handleStartEditRule = (rule) => {
+    setEditingRuleId(rule.id);
+    setEditRuleIcon(rule.icon);
+    setEditRuleTitle(rule.title);
+    setEditRuleValue(rule.value);
+  };
+
+  const handleSaveEditRule = (id) => {
+    const updated = scoringRules.map(r => {
+      if (r.id === id) {
+        return { ...r, icon: editRuleIcon, title: editRuleTitle, value: editRuleValue };
+      }
+      return r;
+    });
+    saveRulesToStorage(updated);
+    setEditingRuleId(null);
+  };
+
   // --- STANJA ZA KATEGORIJE (1:N) ---
   // Mapa koja drži stavke za svaku kategoriju { [catId]: [items...] }
   const [allItemsMap, setAllItemsMap] = useState({});
@@ -1210,17 +1279,17 @@ export default function AdminPanel() {
                     {/* ZELENI AKTIVNI BEDŽ */}
                     {p.prilagodba?.stavka && (
                       <div style={{
-                        marginTop: '5px',
-                        fontSize: '0.68rem',
+                        marginTop: '6px',
+                        fontSize: '0.72rem',
+                        lineHeight: '1.35',
                         color: '#10b981',
                         backgroundColor: 'rgba(16, 185, 129, 0.12)',
                         border: '1px solid rgba(16, 185, 129, 0.3)',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
                         display: 'block',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word'
                       }}>
                         Aktivno: <strong style={{ color: '#34d399' }}>{p.prilagodba.kategorijaNaziv}</strong> ➜ {p.prilagodba.stavka}
                       </div>
@@ -1604,6 +1673,140 @@ export default function AdminPanel() {
         </div>
       </div>
       {/* 👆 KRAJ NOVE SEKCIJE */}
+
+      {/* SEKCIJA: UPRAVLJANJE SUSTAVOM BODOVANJA */}
+        <div style={{ marginTop: '30px', padding: '20px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              ⚖️ Upravljanje Sustavom Bodovanja
+            </h2>
+            <button
+              type="button"
+              onClick={handleResetScoringRules}
+              style={{ background: '#334155', color: '#94a3b8', border: '1px solid #475569', borderRadius: '6px', padding: '6px 12px', fontSize: '0.75rem', cursor: 'pointer' }}
+            >
+              🔄 Vrati na zadano
+            </button>
+          </div>
+
+          {/* Forma za dodavanje novog pravila bodovanja */}
+          <form onSubmit={handleAddRule} style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              placeholder="Ikona"
+              value={newRuleIcon}
+              onChange={(e) => setNewRuleIcon(e.target.value)}
+              style={{ width: '60px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569', textAlign: 'center' }}
+            />
+            <input
+              type="text"
+              placeholder="Naziv pravila (npr. Pobjeda)..."
+              value={newRuleTitle}
+              onChange={(e) => setNewRuleTitle(e.target.value)}
+              style={{ flex: 2, minWidth: '150px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+            />
+            <input
+              type="text"
+              placeholder="Vrijednost (npr. +10 Bodova)..."
+              value={newRuleValue}
+              onChange={(e) => setNewRuleValue(e.target.value)}
+              style={{ flex: 2, minWidth: '180px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+            />
+            <button
+              type="submit"
+              style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              + Dodaj pravilo
+            </button>
+          </form>
+
+          {/* Popis pravila s opcijom uređivanja i brisanja */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {scoringRules.map((rule) => {
+              const isEditing = editingRuleId === rule.id;
+
+              return (
+                <div
+                  key={rule.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    background: '#1e293b',
+                    borderRadius: '6px',
+                    border: isEditing ? '1px solid #fbbf24' : '1px solid #334155',
+                    gap: '8px'
+                  }}
+                >
+                  {isEditing ? (
+                    <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        value={editRuleIcon}
+                        onChange={(e) => setEditRuleIcon(e.target.value)}
+                        style={{ width: '50px', padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24', textAlign: 'center' }}
+                      />
+                      <input
+                        type="text"
+                        value={editRuleTitle}
+                        onChange={(e) => setEditRuleTitle(e.target.value)}
+                        style={{ flex: 1, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
+                      />
+                      <input
+                        type="text"
+                        value={editRuleValue}
+                        onChange={(e) => setEditRuleValue(e.target.value)}
+                        style={{ flex: 1.5, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditRule(rule.id)}
+                        style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}
+                      >
+                        💾
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingRuleId(null)}
+                        style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
+                        <span style={{ fontSize: '1.2rem' }}>{rule.icon}</span>
+                        <span style={{ fontWeight: 'bold' }}>{rule.title}:</span>
+                        <span style={{ color: '#94a3b8' }}>{rule.value}</span>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          type="button"
+                          title="Uredi"
+                          onClick={() => handleStartEditRule(rule)}
+                          style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          title="Obriši"
+                          onClick={() => handleDeleteRule(rule.id)}
+                          style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
     </div>
   );
