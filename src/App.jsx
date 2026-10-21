@@ -638,26 +638,32 @@ export default function App() {
   };
 
   const handleColorSelect = (color) => {
-    const p1ChosenColor = color;
-    const p2ChosenColor = p1ChosenColor === 'WHITE' ? 'BLACK' : 'WHITE';
+    // 1. Provjeravamo tko je birao boju na temelju pobjednika novčića
+    const p1Color = coinWinner === 1 ? color : (color === 'WHITE' ? 'BLACK' : 'WHITE');
+    const p2Color = coinWinner === 2 ? color : (color === 'WHITE' ? 'BLACK' : 'WHITE');
 
+    // 2. Dodjeljujemo figure točno onom igraču koji ima tu boju
     setPlayers({
       WHITE: {
-        name: p1ChosenColor === 'WHITE' ? p1Name : p2Name,
-        id: p1ChosenColor === 'WHITE' ? 1 : 2
+        name: p1Color === 'WHITE' ? p1Name : p2Name,
+        id: p1Color === 'WHITE' ? 1 : 2
       },
       BLACK: {
-        name: p1ChosenColor === 'BLACK' ? p1Name : p2Name,
-        id: p1ChosenColor === 'BLACK' ? 1 : 2
+        name: p1Color === 'BLACK' ? p1Name : p2Name,
+        id: p1Color === 'BLACK' ? 1 : 2
       }
     });
 
+    // 3. Ako igramo protiv AI-ja, botu dajemo njegovu boju
     if (isAIMode) {
-      setAiColor(p2ChosenColor);
+      setAiColor(p2Color);
     }
+
+    // 4. Postavke vremena ako je natjecateljski mod
     const initialSeconds = gameCategory === 'COMPETITIVE' ? timeControl : null;
     setTimeLeft({ WHITE: initialSeconds, BLACK: initialSeconds });
 
+    // Bijeli uvijek vuče prvi
     setTurn('WHITE');
     setSetupStep('PLAY');
   };
@@ -793,10 +799,16 @@ export default function App() {
       } else {
         // Provjera legalnih poteza vrijedi TEK u 2. fazi igre (kad su sve figure na ploči)
         const isPlacementPhaseOver = nextUnplaced.WHITE === 0 && nextUnplaced.BLACK === 0;
-        if (isPlacementPhaseOver && !hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
+
+        const opponentPiecesCount = newBoard.filter(cell => cell === opponent).length;
+        const isOpponentFlying = opponentPiecesCount === 3;
+
+        const oppCount = newBoard.filter(cell => cell === opponent).length;
+        if (isPlacementPhaseOver && (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3))) {
           handleGameEnd(turn);
           return;
         }
+
         syncGameState(newBoard, opponent, {
           mustRemove: false,
           unplaced: nextUnplaced
@@ -836,7 +848,9 @@ export default function App() {
           setMustRemove(true);
           syncGameState(newBoard, turn, { mustRemove: true });
         } else {
-          if (!hasLegalMoves(newBoard, opponent, getPiecesCount(opponent) === 3)) {
+          const oppCount = newBoard.filter(cell => cell === opponent).length;
+
+          if (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3)) {
             handleGameEnd(turn);
             return;
           }
@@ -1236,12 +1250,32 @@ export default function App() {
                     <div className="coin-stage">
                       <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
                         <div className="coin-face front">{t.heads}</div>
-                        <div className="coin-face back">{t.tails}</div>
-                      </div>
+                        <div
+                          className="coin-face back"
+                          style={{
+                            background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)',
+                            color: '#0f172a',
+                            border: '3px solid #e2e8f0',
+                            boxShadow: 'inset 0 0 10px rgba(0, 0, 0, 0.25)'
+                          }}
+                        >
+                          {t.tails}
+                        </div>                      </div>
                     </div>
                     <div className="coin-choice-btns">
                       <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>
-                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')}>{t.tails}</button>
+                      <button
+                        className="btn-gold"
+                        disabled={isFlipping}
+                        onClick={() => triggerCoinFlip('tails')}
+                        style={{
+                          background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)',
+                          color: '#0f172a',
+                          border: '1px solid #cbd5e1'
+                        }}
+                      >
+                        {t.tails}
+                      </button>
                     </div>
                   </>
                 )}
