@@ -70,7 +70,7 @@ export async function updateMatchResults(winnerName, loserName, isDraw = false, 
       return;
     }
 
-    // Dodijeli +25 bodova pobjedniku, oduzmi 20 gubitniku (minimalno 0 bodova)
+    // Dodijeli +12 bodova pobjedniku, oduzmi 6 gubitniku (minimalno 0 bodova)
     const newWinnerPoints = (winnerData.rankPoints || 0) + 12;
     const newLoserPoints = Math.max(0, (loserData.rankPoints || 0) - 6);
 

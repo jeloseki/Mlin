@@ -13,6 +13,16 @@ import {
   updateCategory,
   updateItem
 } from './categoryService';
+import {
+  getStoredAchievements,
+  saveStoredAchievements,
+  ACHIEVEMENT_TIERS,
+  fetchAchievementsFromFirebase,
+  saveAchievementToFirebase,
+  deleteAchievementFromFirebase
+} from './achievementsData';
+import { db } from './firebase';
+import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 
 const AVATAR_OPTIONS = ['🦁', '🧙‍♂️', '⚡', '🌙', '🎨', '🕹️', '❄️', '🤫', '🚀', '🌟', '☕', '🐱', '🤖', '🦊', '🦉', '🎯'];
 
@@ -254,7 +264,9 @@ export default function AdminPanel() {
 
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
 
-// Editiranje bodovanja - LOGIKA
+
+
+  // Editiranje bodovanja - LOGIKA
   const DEFAULT_SCORING_RULES = [
     { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
     { id: 'rule-loss', icon: '❌', title: 'Poraz', value: '-6 Bodova' },
@@ -473,6 +485,153 @@ export default function AdminPanel() {
     return saved ? JSON.parse(saved) : [DEFAULT_IVICA];
   });
 
+  // Stanja za Postignuća (Firebase)
+  const [achievementsList, setAchievementsList] = useState([]);
+  const [achSearch, setAchSearch] = useState('');
+  const [achTierFilter, setAchTierFilter] = useState('ALL');
+  const [loadingAch, setLoadingAch] = useState(false);
+
+  // Učitavanje 100 postignuća s Firebasea pri otvaranju Admin Panela
+  useEffect(() => {
+    const loadAchs = async () => {
+      setLoadingAch(true);
+      try {
+        const data = await fetchAchievementsFromFirebase();
+        setAchievementsList(data);
+      } catch (err) {
+        console.error("Greška pri učitavanju postignuća:", err);
+      } finally {
+        setLoadingAch(false);
+      }
+    };
+    loadAchs();
+  }, []);
+  
+  // Forma za novo postignuće
+  const [newAchData, setNewAchData] = useState({
+    title: '',
+    desc: '',
+    icon: '🏅',
+    tier: 'BRONZE',
+    points: 10
+  });
+
+  // 1:N Profili igrača
+  const [profilesList, setProfilesList] = useState([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [selectedProfile, setSelectedProfile] = useState(null);
+
+  // Učitavanje svih profila s Firebasea (i fallback na lokalni profil)
+  useEffect(() => {
+    const loadProfiles = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'profiles'));
+        const list = [];
+        snap.forEach(d => {
+          list.push({ id: d.id, ...d.data() });
+        });
+
+        const local = localStorage.getItem('mlin_user_profile');
+        if (local) {
+          const parsedLocal = JSON.parse(local);
+          if (!list.some(p => p.id === (parsedLocal.id || 'LOCAL'))) {
+            list.unshift({ id: parsedLocal.id || 'LOCAL', name: parsedLocal.name || 'Lokalni Igrač', achievements: parsedLocal.achievements || [] });
+          }
+        }
+
+        if (list.length === 0) {
+          list.push({ id: 'LOCAL', name: 'Glavni Igrač', achievements: [] });
+        }
+
+        setProfilesList(list);
+        setSelectedProfileId(list[0].id);
+        setSelectedProfile(list[0]);
+      } catch (err) {
+        console.warn("Nije uspjelo učitavanje profila s Firebasea, koristim lokalni:", err);
+        const local = localStorage.getItem('mlin_user_profile');
+        const fallback = local ? JSON.parse(local) : { id: 'LOCAL', name: 'Glavni Igrač', achievements: [] };
+        setProfilesList([fallback]);
+        setSelectedProfileId(fallback.id || 'LOCAL');
+        setSelectedProfile(fallback);
+      }
+    };
+
+    loadProfiles();
+  }, []);
+
+  // Promjena odabranog profila na padajućem izborniku
+  const handleSelectAchievementProfile = (id) => {
+    setSelectedProfileId(id);
+    const found = profilesList.find(p => p.id === id);
+    setSelectedProfile(found || null);
+  };
+
+  // Dodavanje novog postignuća (ide izravno na Firebase)
+  const handleAddNewAchievement = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!newAchData.title.trim()) return;
+
+    const newId = `ach_${Date.now()}`;
+    const item = {
+      id: newId,
+      title: newAchData.title.trim(),
+      desc: newAchData.desc.trim(),
+      icon: newAchData.icon || '🏅',
+      tier: newAchData.tier || 'BRONZE',
+      points: Number(newAchData.points) || 10
+    };
+
+    const updated = [item, ...achievementsList];
+    setAchievementsList(updated);
+    await saveAchievementToFirebase(item);
+    setNewAchData({ title: '', desc: '', icon: '🏅', tier: 'BRONZE', points: 10 });
+  };
+
+  // Trajno brisanje s Firebasea
+  const handleDeleteAch = async (id) => {
+    if (!window.confirm('Sigurno želiš trajno obrisati ovo postignuće s Firebasea?')) return;
+    setAchievementsList(prev => prev.filter(a => a.id !== id));
+    await deleteAchievementFromFirebase(id);
+  };
+
+  // 1:N Dodjela / Oduzimanje za ODABRANOG igrača
+  const handleToggleAchievementForUser = async (achId) => {
+    if (!selectedProfile) return;
+
+    const currentAchs = Array.isArray(selectedProfile.achievements) ? selectedProfile.achievements : [];
+    let updatedAchs = [];
+
+    if (currentAchs.includes(achId)) {
+      updatedAchs = currentAchs.filter(id => id !== achId);
+    } else {
+      updatedAchs = [...currentAchs, achId];
+    }
+
+    const updated = { ...selectedProfile, achievements: updatedAchs };
+    
+    // 1. Ažuriraj stanje u admin panelu
+    setSelectedProfile(updated);
+    setProfilesList(prev => prev.map(p => p.id === updated.id ? updated : p));
+
+    // 2. Ažuriraj u localStorage
+    const local = localStorage.getItem('mlin_user_profile');
+    if (local) {
+      const parsed = JSON.parse(local);
+      if (parsed.id === updated.id || updated.id === 'LOCAL') {
+        localStorage.setItem('mlin_user_profile', JSON.stringify({ ...parsed, achievements: updatedAchs }));
+      }
+    }
+
+    // 3. Ažuriraj na Firebase Firestoreu
+    if (updated.id && updated.id !== 'LOCAL') {
+      try {
+        await updateDoc(doc(db, 'profiles', updated.id), { achievements: updatedAchs });
+      } catch (err) {
+        console.error("Greška pri ažuriranju profila na Firebaseu:", err);
+      }
+    }
+  };
+  
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('🧙‍♂️');
   const [bio, setBio] = useState('');
@@ -1388,425 +1547,369 @@ export default function AdminPanel() {
         })}
       </div>
 
-      {/* ========================================================== */}
-      {/* 👇 NOVA SEKCIJA: UPRAVLJANJE KATEGORIJAMA (1:N VEZA)      */}
+{/* ========================================================== */}
+      {/* 👇 NOVA SEKCIJA: UPRAVLJANJE POSTIGNUĆIMA (1:N VEZA)       */}
       {/* ========================================================== */}
       <div style={{ marginTop: '40px', padding: '24px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-
-          <h2 style={{ color: '#fbbf24', margin: 0 }}>🗂️ Upravljanje Kategorijama i Postavkama </h2>
-          <button
-            type="button"
-            onClick={handleSeedDefaults}
-            style={{
-              backgroundColor: '#059669',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontWeight: 'bold',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            ✨ Učitaj početne kategorije
-          </button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px' }}>
-
-          {/* LIJEVI STUPAC: 1 - Popis Kategorija */}
-          <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ color: '#e2e8f0', margin: 0, fontSize: '1.1rem' }}>Kategorije</h3>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '0.55rem', color: '#94a3b8' }}></span>
-                <select
-                  value={categorySortBy}
-                  onChange={(e) => setCategorySortBy(e.target.value)}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '6px',
-                    background: '#0f172a',
-                    color: '#fbbf24',
-                    border: '1px solid #475569',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="created">🕒 Po redu stvaranja</option>
-                  <option value="alpha">🔤 Abecedno (A - Z)</option>
-                </select>
+        
+        {/* ZAGLAVLJE S 1:N IZBOROM IGRAČA */}
+        <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #475569', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.2rem' }}>🏅 Upravljanje Postignućima i Dodjela Igračima (1:N)</h2>
+              <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '4px' }}>
+                Katalog: <strong style={{ color: '#38bdf8' }}>{achievementsList.length}</strong> postignuća u bazi
               </div>
             </div>
 
-            <form onSubmit={handleAddCategory} style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Naziv kategorije..."
-                value={newCatName}
-                onChange={(e) => setNewCatName(e.target.value)}
-                style={{ padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
-              />
-              <input
-                type="text"
-                placeholder="Opis kategorije..."
-                value={newCatDesc}
-                onChange={(e) => setNewCatDesc(e.target.value)}
-                style={{ padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
-              />
-              <button type="submit" style={{ padding: '8px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                + Dodaj Kategoriju
-              </button>
-            </form>
+            {/* PADAJUĆI IZBORNIK: ODABERI IGRAČA */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '6px', border: '1px solid #334155' }}>
+              <span style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 'bold' }}>👤 Odaberi profil:</span>
+              <select
+                value={selectedProfileId}
+                onChange={(e) => handleSelectAchievementProfile(e.target.value)}
+                style={{
+                  background: '#1e293b',
+                  color: '#fbbf24',
+                  border: '1px solid #475569',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                {profilesList.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || p.username || 'Neimenovani igrač'} (ID: {String(p.id).slice(0, 6)}...)
+                  </option>
+                ))}
+              </select>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
-              {sortedCategories.map((cat) => {
-                const isEditing = editingCategoryId === cat.id;
-
-                return (
-                  <div
-                    key={cat.id}
-                    onClick={() => !isEditing && setSelectedCategory(cat)}
-                    style={{
-                      padding: '10px',
-                      borderRadius: '6px',
-                      cursor: isEditing ? 'default' : 'pointer',
-                      background: selectedCategory?.id === cat.id ? '#334155' : '#0f172a',
-                      border: selectedCategory?.id === cat.id ? '2px solid #fbbf24' : '1px solid #334155',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}
-                  >
-                    {isEditing ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
-                        <input
-                          type="text"
-                          value={editCatName}
-                          onChange={(e) => setEditCatName(e.target.value)}
-                          style={{ padding: '6px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #fbbf24' }}
-                        />
-                        <input
-                          type="text"
-                          value={editCatDesc}
-                          onChange={(e) => setEditCatDesc(e.target.value)}
-                          style={{ padding: '6px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
-                        />
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                          <button
-                            type="button"
-                            onClick={(e) => handleSaveEditCategory(e, cat.id)}
-                            style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                          >
-                            💾 Spremi
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setEditingCategoryId(null); }}
-                            style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                          >
-                            Odustani
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div>
-                          <div style={{ fontWeight: 'bold', color: '#fff' }}>{cat.name}</div>
-                          <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{cat.description}</div>
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            type="button"
-                            title="Uredi kategoriju"
-                            onClick={(e) => handleStartEditCategory(e, cat)}
-                            style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            type="button"
-                            title="Obriši kategoriju"
-                            onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }}
-                            style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+              {selectedProfile && (
+                <span style={{ color: '#4ade80', fontSize: '0.8rem', fontWeight: 'bold', marginLeft: '6px' }}>
+                  Značke: {(selectedProfile.achievements || []).length} / {achievementsList.length}
+                </span>
+              )}
             </div>
           </div>
-
-          {/* DESNI STUPAC: N - Stavke odabrane kategorije */}
-          <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #334155' }}>
-            <h3 style={{ color: '#e2e8f0', marginTop: 0, fontSize: '1.1rem' }}>
-              Stavke unutar: <span style={{ color: '#38bdf8' }}>{selectedCategory ? selectedCategory.name : 'Nije odabrano'}</span>
-            </h3>
-
-            {selectedCategory ? (
-              <>
-                <form onSubmit={handleAddItem} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                  <input
-                    type="text"
-                    placeholder="Naziv stavke (npr. Blitz 45s)..."
-                    value={newItemLabel}
-                    onChange={(e) => setNewItemLabel(e.target.value)}
-                    style={{ flex: 2, padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Vrijednost (npr. 45)..."
-                    value={newItemValue}
-                    onChange={(e) => setNewItemValue(e.target.value)}
-                    style={{ flex: 1, padding: '8px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #475569' }}
-                  />
-                  <button type="submit" style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                    + Dodaj
-                  </button>
-                </form>
-
-                {/* Popis stavki s podrškom za uređivanje (✏️) i brisanje (✕) */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
-                  {categoryItems.length === 0 ? (
-                    <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '8px' }}>
-                      Ova kategorija još nema definiranih stavki.
-                    </div>
-                  ) : (
-                    categoryItems.map((item) => {
-                      const isEditing = editingItemId === item.id;
-
-                      return (
-                        <div
-                          key={item.id}
-                          style={{
-                            padding: '10px 14px',
-                            background: '#0f172a',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            border: isEditing ? '1px solid #38bdf8' : '1px solid #334155',
-                            gap: '8px'
-                          }}
-                        >
-                          {isEditing ? (
-                            /* --- PRIKAZ KAD JE U MODU UREĐIVANJA --- */
-                            <div style={{ display: 'flex', gap: '6px', width: '100%', alignItems: 'center' }}>
-                              <input
-                                type="text"
-                                value={editItemLabel}
-                                onChange={(e) => setEditItemLabel(e.target.value)}
-                                placeholder="Naziv stavke..."
-                                style={{ flex: 2, padding: '6px 8px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #38bdf8' }}
-                              />
-                              <input
-                                type="text"
-                                value={editItemValue}
-                                onChange={(e) => setEditItemValue(e.target.value)}
-                                placeholder="Vrijednost..."
-                                style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
-                              />
-                              <button
-                                type="button"
-                                title="Spremi promjene"
-                                onClick={(e) => handleSaveEditItem(e, item.id)}
-                                style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold' }}
-                              >
-                                💾
-                              </button>
-                              <button
-                                type="button"
-                                title="Odustani"
-                                onClick={(e) => { e.stopPropagation(); setEditingItemId(null); }}
-                                style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '0.85rem' }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ) : (
-                            /* --- NORMALAN PRIKAZ S GUMBIMA ✏️ I ✕ --- */
-                            <>
-                              <span style={{ color: '#fff', fontWeight: '500' }}>
-                                {item.label} <small style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.value})</small>
-                              </span>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button
-                                  type="button"
-                                  title="Uredi stavku"
-                                  onClick={(e) => handleStartEditItem(e, item)}
-                                  style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                                >
-                                  ✏️
-                                </button>
-                                <button
-                                  type="button"
-                                  title="Obriši stavku"
-                                  onClick={() => handleDeleteItem(item.id)}
-                                  style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </>
-            ) : (
-              <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>Odaberite kategoriju s lijeve strane za prikaz njezinih elemenata.</p>
-            )}
-          </div>
-
         </div>
-      </div>
-      {/* 👆 KRAJ NOVE SEKCIJE */}
 
-      {/* SEKCIJA: UPRAVLJANJE SUSTAVOM BODOVANJA */}
-        <div style={{ marginTop: '30px', padding: '20px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              ⚖️ Upravljanje Sustavom Bodovanja
-            </h2>
-            <button
-              type="button"
-              onClick={handleResetScoringRules}
-              style={{ background: '#334155', color: '#94a3b8', border: '1px solid #475569', borderRadius: '6px', padding: '6px 12px', fontSize: '0.75rem', cursor: 'pointer' }}
-            >
-              🔄 Vrati na zadano
-            </button>
+        {/* FORMA ZA UNOS NOVOG POSTIGNUĆA */}
+        <form onSubmit={handleAddNewAchievement} style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #475569', marginBottom: '20px' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#e2e8f0', fontSize: '0.95rem' }}>➕ Stvori novo postignuće (odmah ide na Firebase)</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '60px 2fr 3fr 130px 90px auto', gap: '10px', alignItems: 'center' }}>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Ikona</label>
+              <input
+                type="text"
+                value={newAchData.icon}
+                onChange={(e) => setNewAchData({ ...newAchData, icon: e.target.value })}
+                style={{ width: '100%', padding: '6px', textAlign: 'center', fontSize: '1.2rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Naziv</label>
+              <input
+                type="text"
+                placeholder="npr. Snajper..."
+                value={newAchData.title}
+                onChange={(e) => setNewAchData({ ...newAchData, title: e.target.value })}
+                style={{ width: '100%', padding: '6px 8px', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Opis uvjeta</label>
+              <input
+                type="text"
+                placeholder="Kako se osvaja..."
+                value={newAchData.desc}
+                onChange={(e) => setNewAchData({ ...newAchData, desc: e.target.value })}
+                style={{ width: '100%', padding: '6px 8px', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Razina (Tier)</label>
+              <select
+                value={newAchData.tier}
+                onChange={(e) => setNewAchData({ ...newAchData, tier: e.target.value })}
+                style={{ width: '100%', padding: '6px', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+              >
+                {Object.keys(ACHIEVEMENT_TIERS).map(k => (
+                  <option key={k} value={k}>{ACHIEVEMENT_TIERS[k].label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Bodovi</label>
+              <input
+                type="number"
+                value={newAchData.points}
+                onChange={(e) => setNewAchData({ ...newAchData, points: e.target.value })}
+                style={{ width: '100%', padding: '6px', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+              />
+            </div>
+            <div style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="submit"
+                style={{ padding: '8px 14px', background: '#10b981', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                + Dodaj
+              </button>
+            </div>
           </div>
+        </form>
 
-          {/* Forma za dodavanje novog pravila bodovanja */}
-          <form onSubmit={handleAddRule} style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              placeholder="Ikona"
-              value={newRuleIcon}
-              onChange={(e) => setNewRuleIcon(e.target.value)}
-              style={{ width: '60px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569', textAlign: 'center' }}
-            />
-            <input
-              type="text"
-              placeholder="Naziv pravila (npr. Pobjeda)..."
-              value={newRuleTitle}
-              onChange={(e) => setNewRuleTitle(e.target.value)}
-              style={{ flex: 2, minWidth: '150px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
-            />
-            <input
-              type="text"
-              placeholder="Vrijednost (npr. +10 Bodova)..."
-              value={newRuleValue}
-              onChange={(e) => setNewRuleValue(e.target.value)}
-              style={{ flex: 2, minWidth: '180px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
-            />
-            <button
-              type="submit"
-              style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              + Dodaj pravilo
-            </button>
-          </form>
+        {/* PRETRAGA I FILTERI */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '10px', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="🔍 Pretraži po nazivu ili opisu..."
+            value={achSearch}
+            onChange={(e) => setAchSearch(e.target.value)}
+            style={{ flex: 1, minWidth: '220px', padding: '8px 12px', background: '#1e293b', color: '#fff', border: '1px solid #475569', borderRadius: '6px' }}
+          />
 
-          {/* Popis pravila s opcijom uređivanja i brisanja */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {scoringRules.map((rule) => {
-              const isEditing = editingRuleId === rule.id;
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+            {['ALL', ...Object.keys(ACHIEVEMENT_TIERS)].map(key => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setAchTierFilter(key)}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: '0.75rem',
+                  borderRadius: '4px',
+                  border: '1px solid #334155',
+                  background: achTierFilter === key ? '#3b82f6' : '#1e293b',
+                  color: achTierFilter === key ? '#fff' : '#94a3b8',
+                  cursor: 'pointer'
+                }}
+              >
+                {key === 'ALL' ? 'Sve' : ACHIEVEMENT_TIERS[key].label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 1:N POPIS POSTIGNUĆA I DODJELA NA PROFIL */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '450px', overflowY: 'auto', paddingRight: '4px' }}>
+          {achievementsList
+            .filter(a => {
+              const matchesTier = achTierFilter === 'ALL' || a.tier === achTierFilter;
+              const matchesSearch = a.title?.toLowerCase().includes(achSearch.toLowerCase()) || 
+                                    a.desc?.toLowerCase().includes(achSearch.toLowerCase());
+              return matchesTier && matchesSearch;
+            })
+            .map((ach) => {
+              const userAchs = selectedProfile?.achievements || [];
+              const isAssigned = userAchs.includes(ach.id);
+              const tierData = ACHIEVEMENT_TIERS[ach.tier] || ACHIEVEMENT_TIERS.BRONZE;
 
               return (
                 <div
-                  key={rule.id}
+                  key={ach.id}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '10px 14px',
-                    background: '#1e293b',
+                    padding: '8px 12px',
                     borderRadius: '6px',
-                    border: isEditing ? '1px solid #fbbf24' : '1px solid #334155',
-                    gap: '8px'
+                    background: isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b',
+                    border: isAssigned ? '1px solid #22c55e' : '1px solid #334155',
+                    borderLeft: `5px solid ${tierData.border}`
                   }}
                 >
-                  {isEditing ? (
-                    <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        value={editRuleIcon}
-                        onChange={(e) => setEditRuleIcon(e.target.value)}
-                        style={{ width: '50px', padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24', textAlign: 'center' }}
-                      />
-                      <input
-                        type="text"
-                        value={editRuleTitle}
-                        onChange={(e) => setEditRuleTitle(e.target.value)}
-                        style={{ flex: 1, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
-                      />
-                      <input
-                        type="text"
-                        value={editRuleValue}
-                        onChange={(e) => setEditRuleValue(e.target.value)}
-                        style={{ flex: 1.5, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
-                      />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '1.4rem', minWidth: '32px', textAlign: 'center' }}>{ach.icon || '🏅'}</span>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <strong style={{ color: '#fff', fontSize: '0.9rem' }}>{ach.title}</strong>
+                        <span style={{ fontSize: '0.65rem', padding: '1px 5px', borderRadius: '3px', background: tierData.border, color: '#000', fontWeight: 'bold' }}>
+                          {tierData.label}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#fbbf24', fontWeight: 'bold' }}>+{ach.points} B</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{ach.desc}</div>
+                    </div>
+                  </div>
+
+                  {/* 1:N KONTROLE: DODIJELI / ODUZMI + BRISANJE */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAchievementForUser(ach.id)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '0.75rem',
+                        fontWeight: 'bold',
+                        borderRadius: '4px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: isAssigned ? '#ef4444' : '#22c55e',
+                        color: '#fff'
+                      }}
+                    >
+                      {isAssigned ? '✖ Oduzmi igraču' : '✔ Dodijeli igraču'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteAch(ach.id)}
+                      title="Trajno obriši s Firebasea"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #475569',
+                        color: '#94a3b8',
+                        borderRadius: '4px',
+                        padding: '4px 6px',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem'
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+
+      </div>
+      {/* 👆 KRAJ NOVE SEKCIJE */}
+
+      {/* SEKCIJA: UPRAVLJANJE SUSTAVOM BODOVANJA */}
+      <div style={{ marginTop: '30px', padding: '20px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            ⚖️ Upravljanje Sustavom Bodovanja
+          </h2>
+          <button
+            type="button"
+            onClick={handleResetScoringRules}
+            style={{ background: '#334155', color: '#94a3b8', border: '1px solid #475569', borderRadius: '6px', padding: '6px 12px', fontSize: '0.75rem', cursor: 'pointer' }}
+          >
+            🔄 Vrati na zadano
+          </button>
+        </div>
+
+        {/* Forma za dodavanje novog pravila bodovanja */}
+        <form onSubmit={handleAddRule} style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="Ikona"
+            value={newRuleIcon}
+            onChange={(e) => setNewRuleIcon(e.target.value)}
+            style={{ width: '60px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569', textAlign: 'center' }}
+          />
+          <input
+            type="text"
+            placeholder="Naziv pravila (npr. Pobjeda)..."
+            value={newRuleTitle}
+            onChange={(e) => setNewRuleTitle(e.target.value)}
+            style={{ flex: 2, minWidth: '150px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+          />
+          <input
+            type="text"
+            placeholder="Vrijednost (npr. +10 Bodova)..."
+            value={newRuleValue}
+            onChange={(e) => setNewRuleValue(e.target.value)}
+            style={{ flex: 2, minWidth: '180px', padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#fff', border: '1px solid #475569' }}
+          />
+          <button
+            type="submit"
+            style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            + Dodaj pravilo
+          </button>
+        </form>
+
+        {/* Popis pravila s opcijom uređivanja i brisanja */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {scoringRules.map((rule) => {
+            const isEditing = editingRuleId === rule.id;
+
+            return (
+              <div
+                key={rule.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: '#1e293b',
+                  borderRadius: '6px',
+                  border: isEditing ? '1px solid #fbbf24' : '1px solid #334155',
+                  gap: '8px'
+                }}
+              >
+                {isEditing ? (
+                  <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={editRuleIcon}
+                      onChange={(e) => setEditRuleIcon(e.target.value)}
+                      style={{ width: '50px', padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24', textAlign: 'center' }}
+                    />
+                    <input
+                      type="text"
+                      value={editRuleTitle}
+                      onChange={(e) => setEditRuleTitle(e.target.value)}
+                      style={{ flex: 1, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
+                    />
+                    <input
+                      type="text"
+                      value={editRuleValue}
+                      onChange={(e) => setEditRuleValue(e.target.value)}
+                      style={{ flex: 1.5, padding: '6px', borderRadius: '4px', background: '#0f172a', color: '#fff', border: '1px solid #fbbf24' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEditRule(rule.id)}
+                      style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      💾
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingRuleId(null)}
+                      style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
+                      <span style={{ fontSize: '1.2rem' }}>{rule.icon}</span>
+                      <span style={{ fontWeight: 'bold' }}>{rule.title}:</span>
+                      <span style={{ color: '#94a3b8' }}>{rule.value}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
                       <button
                         type="button"
-                        onClick={() => handleSaveEditRule(rule.id)}
-                        style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}
+                        title="Uredi"
+                        onClick={() => handleStartEditRule(rule)}
+                        style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
                       >
-                        💾
+                        ✏️
                       </button>
                       <button
                         type="button"
-                        onClick={() => setEditingRuleId(null)}
-                        style={{ background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer' }}
+                        title="Obriši"
+                        onClick={() => handleDeleteRule(rule.id)}
+                        style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f8fafc' }}>
-                        <span style={{ fontSize: '1.2rem' }}>{rule.icon}</span>
-                        <span style={{ fontWeight: 'bold' }}>{rule.title}:</span>
-                        <span style={{ color: '#94a3b8' }}>{rule.value}</span>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          type="button"
-                          title="Uredi"
-                          onClick={() => handleStartEditRule(rule)}
-                          style={{ background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          type="button"
-                          title="Obriši"
-                          onClick={() => handleDeleteRule(rule.id)}
-                          style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '0.8rem' }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
+      </div>
 
     </div>
   );

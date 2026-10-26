@@ -9,6 +9,7 @@ import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboar
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -318,6 +319,16 @@ export default function App() {
   const [activeHeldPiece, setActiveHeldPiece] = useState(null);
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
+
+  // Učitavanje postignuća
+  const [achievementsCatalog, setAchievementsCatalog] = useState(() => {
+    try {
+      return getStoredAchievements();
+    } catch (e) {
+      return [];
+    }
+  });
+  const [achievementFilter, setAchievementFilter] = useState('ALL');
 
   // Učitavanje pravila bodovanja (iz admin panela ili zadani niz)
   const DEFAULT_SCORING_RULES = [
@@ -943,15 +954,21 @@ export default function App() {
               ⚙️ Admin Panel
             </button>
           </div>
-          <div className="menu-grid-2col">
+        <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
             <button className="btn-menu" onClick={() => { setProfileTab('STATS'); setCurrentScreen('PROFILE'); }}>{t.profile}</button>
+
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
+
             <button className="btn-menu" disabled>{t.playOnline}</button>
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
+
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
+            <button className="btn-menu" onClick={() => { setAchievementsCatalog(getStoredAchievements()); setCurrentScreen('ACHIEVEMENTS'); }}>🏅 {t.achievementsTitle || 'Postignuća'}</button>
+
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
+            <button className="btn-menu" onClick={() => setIsAdminOpen(true)}>⁉️ Dodajem poslije</button>
           </div>
         </div>
       )}
@@ -1172,6 +1189,134 @@ export default function App() {
             </div>
           </div>
           <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
+        </div>
+      )}
+
+     {/* EKRAN: POSTIGNUĆA */}
+      {currentScreen === 'ACHIEVEMENTS' && (
+        <div 
+          className="menu-card" 
+          onClick={(e) => e.stopPropagation()} 
+          style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h2 className="menu-title" style={{ margin: 0 }}>🏅 Postignuća</h2>
+            <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
+              Otključano: {(profile?.achievements || []).length} / {(achievementsCatalog || []).length}
+            </div>
+          </div>
+
+          {/* Filteri */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            {[
+              { id: 'ALL', label: 'Sve' },
+              { id: 'UNLOCKED', label: 'Otključana' },
+              { id: 'LOCKED', label: 'Zaključana' }
+            ].map(f => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setAchievementFilter(f.id)}
+                style={{
+                  background: achievementFilter === f.id ? '#3b82f6' : '#1e293b',
+                  color: achievementFilter === f.id ? '#fff' : '#94a3b8',
+                  border: '1px solid #334155',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Popis kartica postignuća */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+            {(achievementsCatalog || [])
+              .filter(ach => {
+                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
+                const isUnlocked = userAchs.includes(ach.id);
+                if (achievementFilter === 'UNLOCKED') return isUnlocked;
+                if (achievementFilter === 'LOCKED') return !isUnlocked;
+                return true;
+              })
+              .map((ach) => {
+                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
+                const isUnlocked = userAchs.includes(ach.id);
+                
+                // Sigurno dohvaćanje tier stila
+                const defaultTier = { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
+                const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
+
+                return (
+                  <div
+                    key={ach.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: isUnlocked ? tierInfo.bg : 'rgba(15, 23, 42, 0.6)',
+                      border: isUnlocked ? `1px solid ${tierInfo.border}` : '1px solid #334155',
+                      opacity: isUnlocked ? 1 : 0.45,
+                      filter: isUnlocked ? 'none' : 'grayscale(80%)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ fontSize: '1.8rem', minWidth: '40px', textAlign: 'center' }}>
+                      {ach.icon || '🏅'}
+                    </div>
+
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>
+                          {ach.title}
+                        </span>
+                        <span style={{
+                          fontSize: '0.65rem',
+                          textTransform: 'uppercase',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: tierInfo.border,
+                          color: '#000',
+                          fontWeight: 'bold'
+                        }}>
+                          {tierInfo.label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>
+                        {ach.desc}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right', minWidth: '70px' }}>
+                      <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                        +{ach.points} B
+                      </div>
+                      <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                        {isUnlocked ? (
+                          <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span>
+                        ) : (
+                          <span style={{ color: '#64748b' }}>🔒 Zaključano</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          <button 
+            type="button"
+            className="btn-menu btn-back" 
+            onClick={() => setCurrentScreen('MAIN_MENU')}
+            style={{ marginTop: '14px' }}
+          >
+            {t?.back || 'Natrag'}
+          </button>
         </div>
       )}
 
