@@ -10,6 +10,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
+import { evaluateGameAchievements } from './achievementsEvaluator';
 
 const DEFAULT_AVATARS = [
   '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
@@ -281,8 +282,34 @@ export default function App() {
     };
   });
 
+  // Sinkronizacija profila iz localStorage-a
+  useEffect(() => {
+    const syncProfileFromStorage = () => {
+      try {
+        const saved = localStorage.getItem('mlin_user_profile');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setProfile(parsed);
+        }
+      } catch (err) {
+        console.error("Greška pri sinkronizaciji profila:", err);
+      }
+    };
+
+    // Provjeri pri svakom montiranju / fokusu prozora
+    syncProfileFromStorage();
+    window.addEventListener('storage', syncProfileFromStorage);
+    window.addEventListener('focus', syncProfileFromStorage);
+
+    return () => {
+      window.removeEventListener('storage', syncProfileFromStorage);
+      window.removeEventListener('focus', syncProfileFromStorage);
+    };
+  }, []);
+
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
+
 
   // AI STANJA
   const [isAIMode, setIsAIMode] = useState(false);
@@ -718,14 +745,29 @@ export default function App() {
       category: gameCategory
     };
 
-    setProfile(prev => ({
-      ...prev,
+    // 1. Pripremi profil s osvježenim statistikama meča
+    const baseUpdatedProfile = {
+      ...profile,
       points: newPoints,
-      wins: isUserWinner ? prev.wins + 1 : prev.wins,
-      losses: !isUserWinner ? prev.losses + 1 : prev.losses,
-      matchHistory: [newMatch, ...prev.matchHistory.slice(0, 9)]
-    }));
+      wins: isUserWinner ? (profile.wins || 0) + 1 : (profile.wins || 0),
+      losses: !isUserWinner ? (profile.losses || 0) + 1 : (profile.losses || 0),
+      matchHistory: [newMatch, ...(profile.matchHistory || []).slice(0, 9)]
+    };
 
+    // 2. Evaluacija svih postignuća prema podacima iz meča
+    const finalProfile = evaluateGameAchievements(baseUpdatedProfile, {
+      isWin: isUserWinner,
+      isAIMode: isAIMode,
+      aiDifficulty: typeof aiDifficulty !== 'undefined' ? aiDifficulty : (opponentName?.includes('Lako') ? 'EASY' : 'MEDIUM'),
+      millsFormed: typeof playerMillsCount !== 'undefined' ? playerMillsCount : (isUserWinner ? 1 : 0),
+      wonByBlock: typeof isOpponentTrapped !== 'undefined' ? isOpponentTrapped : false,
+      lostByBlock: typeof isPlayerTrapped !== 'undefined' ? isPlayerTrapped : false,
+      piecesCaptured: typeof enemyCapturedCount !== 'undefined' ? enemyCapturedCount : (isUserWinner ? 7 : 0),
+      totalTurns: typeof moveCount !== 'undefined' ? moveCount : 40
+    });
+
+    // 3. Postavi u React stanje i spremi meč
+    setProfile(finalProfile);
     saveMatchHistory(newMatch);
 
     if (!isAIMode) {
@@ -954,7 +996,7 @@ export default function App() {
               ⚙️ Admin Panel
             </button>
           </div>
-        <div className="menu-grid-2col">
+          <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
             <button className="btn-menu" onClick={() => { setProfileTab('STATS'); setCurrentScreen('PROFILE'); }}>{t.profile}</button>
 
@@ -965,7 +1007,18 @@ export default function App() {
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
 
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
-            <button className="btn-menu" onClick={() => { setAchievementsCatalog(getStoredAchievements()); setCurrentScreen('ACHIEVEMENTS'); }}>🏅 {t.achievementsTitle || 'Postignuća'}</button>
+            <button
+              className="btn-menu"
+              onClick={() => {
+                try {
+                  const saved = localStorage.getItem('mlin_user_profile');
+                  if (saved) setProfile(JSON.parse(saved));
+                } catch (e) { }
+                setCurrentScreen('ACHIEVEMENTS');
+              }}
+            >
+              🏅 Postignuća
+            </button>
 
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
             <button className="btn-menu" onClick={() => setIsAdminOpen(true)}>⁉️ Dodajem poslije</button>
@@ -1040,21 +1093,48 @@ export default function App() {
           )}
 
           {profileTab === 'BADGES' && (
-            <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              <div className="achievement-card">
-                <div className="achievement-icon">⚡</div>
-                <div>
-                  <div style={{ fontWeight: 'bold' }}>{t.ach1Title}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{t.ach1Desc}</div>
-                </div>
-              </div>
-              <div className="achievement-card">
-                <div className="achievement-icon">🏆</div>
-                <div>
-                  <div style={{ fontWeight: 'bold' }}>{t.ach2Title}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{t.ach2Desc}</div>
-                </div>
-              </div>
+            <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+              {(() => {
+                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
+                // Pronađi sva postignuća iz kataloga koja korisnik ima otključana
+                const unlockedList = (achievementsCatalog || []).filter(ach => userAchs.includes(ach.id));
+
+                if (unlockedList.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>
+                      Igrač još nema dodijeljenih postignuća.
+                    </div>
+                  );
+                }
+
+                return unlockedList.map((ach) => (
+                  <div
+                    key={ach.id}
+                    className="achievement-card"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      background: '#0f172a',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      borderLeft: '4px solid #22c55e'
+                    }}
+                  >
+                    <div className="achievement-icon" style={{ fontSize: '1.4rem' }}>
+                      {ach.icon || '🏅'}
+                    </div>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>
+                        {ach.title || ach.name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                        {ach.description || ach.desc}
+                      </div>
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           )}
 
@@ -1192,11 +1272,11 @@ export default function App() {
         </div>
       )}
 
-     {/* EKRAN: POSTIGNUĆA */}
+      {/* EKRAN: POSTIGNUĆA */}
       {currentScreen === 'ACHIEVEMENTS' && (
-        <div 
-          className="menu-card" 
-          onClick={(e) => e.stopPropagation()} 
+        <div
+          className="menu-card"
+          onClick={(e) => e.stopPropagation()}
           style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -1245,7 +1325,7 @@ export default function App() {
               .map((ach) => {
                 const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
                 const isUnlocked = userAchs.includes(ach.id);
-                
+
                 // Sigurno dohvaćanje tier stila
                 const defaultTier = { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
                 const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
@@ -1309,9 +1389,9 @@ export default function App() {
               })}
           </div>
 
-          <button 
+          <button
             type="button"
-            className="btn-menu btn-back" 
+            className="btn-menu btn-back"
             onClick={() => setCurrentScreen('MAIN_MENU')}
             style={{ marginTop: '14px' }}
           >

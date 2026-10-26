@@ -506,7 +506,7 @@ export default function AdminPanel() {
     };
     loadAchs();
   }, []);
-  
+
   // Forma za novo postignuće
   const [newAchData, setNewAchData] = useState({
     title: '',
@@ -516,54 +516,17 @@ export default function AdminPanel() {
     points: 10
   });
 
-  // 1:N Profili igrača
-  const [profilesList, setProfilesList] = useState([]);
-  const [selectedProfileId, setSelectedProfileId] = useState('');
-  const [selectedProfile, setSelectedProfile] = useState(null);
+  // 1:N Profili igrača (povezano na pravo stanje profiles)
+  const [selectedProfileId, setSelectedProfileId] = useState(() => {
+    return (profiles && profiles.length > 0) ? (profiles[0].id || profiles[0].name) : '';
+  });
 
-  // Učitavanje svih profila s Firebasea (i fallback na lokalni profil)
-  useEffect(() => {
-    const loadProfiles = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'profiles'));
-        const list = [];
-        snap.forEach(d => {
-          list.push({ id: d.id, ...d.data() });
-        });
+  const currentSelectedProfile = (profiles || []).find(
+    p => (p.id || p.name) === selectedProfileId
+  ) || (profiles && profiles.length > 0 ? profiles[0] : null);
 
-        const local = localStorage.getItem('mlin_user_profile');
-        if (local) {
-          const parsedLocal = JSON.parse(local);
-          if (!list.some(p => p.id === (parsedLocal.id || 'LOCAL'))) {
-            list.unshift({ id: parsedLocal.id || 'LOCAL', name: parsedLocal.name || 'Lokalni Igrač', achievements: parsedLocal.achievements || [] });
-          }
-        }
-
-        if (list.length === 0) {
-          list.push({ id: 'LOCAL', name: 'Glavni Igrač', achievements: [] });
-        }
-
-        setProfilesList(list);
-        setSelectedProfileId(list[0].id);
-        setSelectedProfile(list[0]);
-      } catch (err) {
-        console.warn("Nije uspjelo učitavanje profila s Firebasea, koristim lokalni:", err);
-        const local = localStorage.getItem('mlin_user_profile');
-        const fallback = local ? JSON.parse(local) : { id: 'LOCAL', name: 'Glavni Igrač', achievements: [] };
-        setProfilesList([fallback]);
-        setSelectedProfileId(fallback.id || 'LOCAL');
-        setSelectedProfile(fallback);
-      }
-    };
-
-    loadProfiles();
-  }, []);
-
-  // Promjena odabranog profila na padajućem izborniku
   const handleSelectAchievementProfile = (id) => {
     setSelectedProfileId(id);
-    const found = profilesList.find(p => p.id === id);
-    setSelectedProfile(found || null);
   };
 
   // Dodavanje novog postignuća (ide izravno na Firebase)
@@ -594,44 +557,67 @@ export default function AdminPanel() {
     await deleteAchievementFromFirebase(id);
   };
 
-  // 1:N Dodjela / Oduzimanje za ODABRANOG igrača
+  // 1:N Dodjela / Oduzimanje značke odabranom profilu
   const handleToggleAchievementForUser = async (achId) => {
-    if (!selectedProfile) return;
+    if (!currentSelectedProfile) return;
 
-    const currentAchs = Array.isArray(selectedProfile.achievements) ? selectedProfile.achievements : [];
+    const currentProfileKey = currentSelectedProfile.id || currentSelectedProfile.name;
+    const currentAchs = Array.isArray(currentSelectedProfile.achievements)
+      ? [...currentSelectedProfile.achievements]
+      : [];
+
+    // Dodaj ako nema, makni ako već ima
     let updatedAchs = [];
-
     if (currentAchs.includes(achId)) {
       updatedAchs = currentAchs.filter(id => id !== achId);
     } else {
       updatedAchs = [...currentAchs, achId];
     }
 
-    const updated = { ...selectedProfile, achievements: updatedAchs };
-    
-    // 1. Ažuriraj stanje u admin panelu
-    setSelectedProfile(updated);
-    setProfilesList(prev => prev.map(p => p.id === updated.id ? updated : p));
+    // 1. Ažuriraj stanje `profiles` u Admin Panelu
+    const updatedProfiles = profiles.map(p => {
+      const pKey = p.id || p.name;
+      if (pKey === currentProfileKey) {
+        return { ...p, achievements: updatedAchs };
+      }
+      return p;
+    });
 
-    // 2. Ažuriraj u localStorage
-    const local = localStorage.getItem('mlin_user_profile');
-    if (local) {
-      const parsed = JSON.parse(local);
-      if (parsed.id === updated.id || updated.id === 'LOCAL') {
-        localStorage.setItem('mlin_user_profile', JSON.stringify({ ...parsed, achievements: updatedAchs }));
+    setProfiles(updatedProfiles);
+    localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedProfiles));
+
+    // 2. Ažuriraj trenutno aktivni profil za igru (`mlin_user_profile`)
+    const activeRaw = localStorage.getItem('mlin_user_profile');
+    if (activeRaw) {
+      try {
+        const parsedActive = JSON.parse(activeRaw);
+        // Ako je ažurirani igrač onaj koji je trenutno prijavljen u igri:
+        if (
+          parsedActive.id === currentSelectedProfile.id ||
+          parsedActive.name === currentSelectedProfile.name
+        ) {
+          const updatedActive = { ...parsedActive, achievements: updatedAchs };
+          localStorage.setItem('mlin_user_profile', JSON.stringify(updatedActive));
+          // Emitiraj događaj da ostale komponente (glavni meni / profil) odmah saznaju za promjenu
+          window.dispatchEvent(new Event('storage'));
+        }
+      } catch (err) {
+        console.warn("Greška pri ažuriranju mlin_user_profile:", err);
       }
     }
 
-    // 3. Ažuriraj na Firebase Firestoreu
-    if (updated.id && updated.id !== 'LOCAL') {
+    // 3. Ako profil ima Firestore ID, ažuriraj i u Firebaseu
+    if (currentSelectedProfile.id && db) {
       try {
-        await updateDoc(doc(db, 'profiles', updated.id), { achievements: updatedAchs });
+        await updateDoc(doc(db, 'profiles', currentSelectedProfile.id), {
+          achievements: updatedAchs
+        });
       } catch (err) {
-        console.error("Greška pri ažuriranju profila na Firebaseu:", err);
+        // Lokalni profil (nema Firestore dokument), mirno nastavi
       }
     }
   };
-  
+
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('🧙‍♂️');
   const [bio, setBio] = useState('');
@@ -674,16 +660,21 @@ export default function AdminPanel() {
   const handleSelectProfile = (player) => {
     if (isDeleteMode || editingId !== null) return;
 
+    // Uzmi najnovije stanje tog igrača iz niza profiles (gdje su dodijeljene značke)
+    const freshPlayer = profiles.find(p => (p.id || p.name) === (player.id || player.name)) || player;
+
     const activeProfile = {
-      name: player.name,
-      avatar: player.avatar,
-      bio: player.bio || 'Spreman za igru!',
-      country: player.country || 'HR',
-      points: player.points || 0,
-      wins: player.wins || 0,
-      losses: player.losses || 0,
-      matchHistory: [],
-      prilagodba: player.prilagodba || {}
+      id: freshPlayer.id || ('player-' + Date.now()),
+      name: freshPlayer.name,
+      avatar: freshPlayer.avatar,
+      bio: freshPlayer.bio || 'Spreman za igru!',
+      country: freshPlayer.country || 'HR',
+      points: freshPlayer.points || 0,
+      wins: freshPlayer.wins || 0,
+      losses: freshPlayer.losses || 0,
+      matchHistory: freshPlayer.matchHistory || [],
+      prilagodba: freshPlayer.prilagodba || {},
+      achievements: Array.isArray(freshPlayer.achievements) ? freshPlayer.achievements : [] // 👈 OVDJE ČUVAMO ZNAČKE
     };
 
     localStorage.setItem('mlin_user_profile', JSON.stringify(activeProfile));
@@ -819,7 +810,8 @@ export default function AdminPanel() {
         points: 0,
         wins: 0,
         losses: 0,
-        prilagodba: null
+        prilagodba: null,
+        achievements: []
       };
 
       const updated = [...profiles, newProfile];
@@ -1547,11 +1539,11 @@ export default function AdminPanel() {
         })}
       </div>
 
-{/* ========================================================== */}
+      {/* ========================================================== */}
       {/* 👇 NOVA SEKCIJA: UPRAVLJANJE POSTIGNUĆIMA (1:N VEZA)       */}
       {/* ========================================================== */}
       <div style={{ marginTop: '40px', padding: '24px', background: '#0f172a', borderRadius: '12px', border: '1px solid #334155' }}>
-        
+
         {/* ZAGLAVLJE S 1:N IZBOROM IGRAČA */}
         <div style={{ background: '#1e293b', padding: '16px', borderRadius: '8px', border: '1px solid #475569', marginBottom: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -1578,16 +1570,19 @@ export default function AdminPanel() {
                   cursor: 'pointer'
                 }}
               >
-                {profilesList.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name || p.username || 'Neimenovani igrač'} (ID: {String(p.id).slice(0, 6)}...)
-                  </option>
-                ))}
+                {profiles && profiles.map(p => {
+                  const val = p.id || p.name;
+                  return (
+                    <option key={val} value={val}>
+                      {p.name || 'Neimenovani igrač'}
+                    </option>
+                  );
+                })}
               </select>
 
-              {selectedProfile && (
+              {currentSelectedProfile && (
                 <span style={{ color: '#4ade80', fontSize: '0.8rem', fontWeight: 'bold', marginLeft: '6px' }}>
-                  Značke: {(selectedProfile.achievements || []).length} / {achievementsList.length}
+                  Značke: {(currentSelectedProfile.achievements || []).length} / {achievementsList.length}
                 </span>
               )}
             </div>
@@ -1696,12 +1691,12 @@ export default function AdminPanel() {
           {achievementsList
             .filter(a => {
               const matchesTier = achTierFilter === 'ALL' || a.tier === achTierFilter;
-              const matchesSearch = a.title?.toLowerCase().includes(achSearch.toLowerCase()) || 
-                                    a.desc?.toLowerCase().includes(achSearch.toLowerCase());
+              const matchesSearch = a.title?.toLowerCase().includes(achSearch.toLowerCase()) ||
+                a.desc?.toLowerCase().includes(achSearch.toLowerCase());
               return matchesTier && matchesSearch;
             })
             .map((ach) => {
-              const userAchs = selectedProfile?.achievements || [];
+              const userAchs = Array.isArray(currentSelectedProfile?.achievements) ? currentSelectedProfile.achievements : [];
               const isAssigned = userAchs.includes(ach.id);
               const tierData = ACHIEVEMENT_TIERS[ach.tier] || ACHIEVEMENT_TIERS.BRONZE;
 
@@ -1715,7 +1710,9 @@ export default function AdminPanel() {
                     padding: '8px 12px',
                     borderRadius: '6px',
                     background: isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b',
-                    border: isAssigned ? '1px solid #22c55e' : '1px solid #334155',
+                    borderTop: isAssigned ? '1px solid #22c55e' : '1px solid #334155',
+                    borderRight: isAssigned ? '1px solid #22c55e' : '1px solid #334155',
+                    borderBottom: isAssigned ? '1px solid #22c55e' : '1px solid #334155',
                     borderLeft: `5px solid ${tierData.border}`
                   }}
                 >
@@ -1739,14 +1736,15 @@ export default function AdminPanel() {
                       type="button"
                       onClick={() => handleToggleAchievementForUser(ach.id)}
                       style={{
-                        padding: '6px 12px',
-                        fontSize: '0.75rem',
-                        fontWeight: 'bold',
-                        borderRadius: '4px',
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
                         border: 'none',
+                        fontWeight: 'bold',
                         cursor: 'pointer',
                         background: isAssigned ? '#ef4444' : '#22c55e',
-                        color: '#fff'
+                        color: '#ffffff',
+                        transition: 'background 0.2s'
                       }}
                     >
                       {isAssigned ? '✖ Oduzmi igraču' : '✔ Dodijeli igraču'}
