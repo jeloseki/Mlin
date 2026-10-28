@@ -23,6 +23,7 @@ const DEFAULT_IVICA = {
   points: 0,
   wins: 0,
   losses: 0,
+  matchHistory: [],
   achievements: []
 };
 
@@ -60,6 +61,8 @@ const MENU_GROUPS = [
     ]
   }
 ];
+
+const SIDEBAR_WIDTH = 'max(220px, calc((100vw - 1130px) / 2))';
 
 const S = {
   card: {
@@ -106,59 +109,46 @@ const S = {
 export default function AdminPanel() {
   const navigate = useNavigate();
 
-  // Navigacija Sidebara
+  // --- STANJA: NAVIGACIJA I SIDEBAR ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth > 900);
   const [activeAdminTab, setActiveAdminTab] = useState('profiles_list');
   const [openMenus, setOpenMenus] = useState({ profiles: true, achievements: true, system: true });
-  const toggleMenuGroup = (group) => setOpenMenus(prev => ({ ...prev, [group]: !prev[group] }));
-
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
+
+  const toggleMenuGroup = (group) => setOpenMenus(prev => ({ ...prev, [group]: !prev[group] }));
 
   // --- STANJA: BODOVANJE ---
   const [scoringRules, setScoringRules] = useState(() => {
     const saved = localStorage.getItem('mlin_scoring_rules');
     return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
   });
-  const [newRuleIcon, setNewRuleIcon] = useState('⭐');
-  const [newRuleTitle, setNewRuleTitle] = useState('');
-  const [newRuleValue, setNewRuleValue] = useState('');
-  const [editingRuleId, setEditingRuleId] = useState(null);
-  const [editRuleTitle, setEditRuleTitle] = useState('');
-  const [editRuleValue, setEditRuleValue] = useState('');
-  const [editRuleIcon, setEditRuleIcon] = useState('');
+  const [newRule, setNewRule] = useState({ icon: '⭐', title: '', value: '' });
+  const [editingRule, setEditingRule] = useState(null); // { id, icon, title, value }
 
   const saveRulesToStorage = (rules) => {
     setScoringRules(rules);
     localStorage.setItem('mlin_scoring_rules', JSON.stringify(rules));
   };
 
-  const handleResetScoringRules = () => saveRulesToStorage(DEFAULT_SCORING_RULES);
-
   const handleAddRule = (e) => {
     e.preventDefault();
-    if (!newRuleTitle.trim() || !newRuleValue.trim()) return;
-    const newRule = {
+    if (!newRule.title.trim() || !newRule.value.trim()) return;
+    const ruleToAdd = {
       id: 'rule-' + Date.now(),
-      icon: newRuleIcon || '⭐',
-      title: newRuleTitle.trim(),
-      value: newRuleValue.trim()
+      icon: newRule.icon || '⭐',
+      title: newRule.title.trim(),
+      value: newRule.value.trim()
     };
-    saveRulesToStorage([...scoringRules, newRule]);
-    setNewRuleTitle('');
-    setNewRuleValue('');
+    saveRulesToStorage([...scoringRules, ruleToAdd]);
+    setNewRule({ icon: '⭐', title: '', value: '' });
   };
 
   const handleDeleteRule = (id) => saveRulesToStorage(scoringRules.filter(r => r.id !== id));
 
-  const handleStartEditRule = (rule) => {
-    setEditingRuleId(rule.id);
-    setEditRuleIcon(rule.icon);
-    setEditRuleTitle(rule.title);
-    setEditRuleValue(rule.value);
-  };
-
-  const handleSaveEditRule = (id) => {
-    saveRulesToStorage(scoringRules.map(r => r.id === id ? { ...r, icon: editRuleIcon, title: editRuleTitle, value: editRuleValue } : r));
-    setEditingRuleId(null);
+  const handleSaveEditRule = () => {
+    if (!editingRule) return;
+    saveRulesToStorage(scoringRules.map(r => r.id === editingRule.id ? editingRule : r));
+    setEditingRule(null);
   };
 
   // --- STANJA: PROFILI IGRAČA ---
@@ -177,13 +167,35 @@ export default function AdminPanel() {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedForDelete, setSelectedForDelete] = useState([]);
 
+  // Sinkronizacija profila ako se promijene u localStorageu
+  useEffect(() => {
+    const syncProfiles = () => {
+      const saved = localStorage.getItem('mlin_admin_profiles');
+      if (saved) {
+        try {
+          setProfiles(JSON.parse(saved));
+        } catch (err) {
+          console.error('Greška pri sinkronizaciji profila:', err);
+        }
+      }
+    };
+    window.addEventListener('storage', syncProfiles);
+    return () => window.removeEventListener('storage', syncProfiles);
+  }, []);
+
   // --- STANJA: POSTIGNUĆA (1:N) ---
   const [achievementsList, setAchievementsList] = useState([]);
   const [achSearch, setAchSearch] = useState('');
   const [achTierFilter, setAchTierFilter] = useState('ALL');
   const [loadingAch, setLoadingAch] = useState(false);
   const [newAchData, setNewAchData] = useState({ title: '', desc: '', icon: '🏅', tier: 'BRONZE', points: 10 });
-  const [selectedProfileId, setSelectedProfileId] = useState(() => (profiles && profiles.length > 0) ? (profiles[0].id || profiles[0].name) : '');
+  const [selectedProfileId, setSelectedProfileId] = useState(() =>
+    profiles.length > 0 ? (profiles[0].id || profiles[0].name) : ''
+  );
+
+  // Stanje za inline uređivanje postignuća u katalogu
+  const [editingAchId, setEditingAchId] = useState(null);
+  const [editAchData, setEditAchData] = useState({ title: '', desc: '', icon: '', tier: 'BRONZE', points: 10 });
 
   useEffect(() => {
     const loadAchs = async () => {
@@ -192,7 +204,7 @@ export default function AdminPanel() {
         const data = await fetchAchievementsFromFirebase();
         setAchievementsList(data);
       } catch (err) {
-        console.error("Greška pri učitavanju postignuća:", err);
+        console.error('Greška pri učitavanju postignuća:', err);
       } finally {
         setLoadingAch(false);
       }
@@ -200,14 +212,25 @@ export default function AdminPanel() {
     loadAchs();
   }, []);
 
-  const currentSelectedProfile = (profiles || []).find(p => (p.id || p.name) === selectedProfileId) || (profiles && profiles.length > 0 ? profiles[0] : null);
+  const currentSelectedProfile = profiles.find(p => (p.id || p.name) === selectedProfileId) || profiles[0] || null;
 
   const handleAddNewAchievement = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!newAchData.title.trim()) return;
 
+    // Pronađi najveći postojeći broj iz ID-jeva (npr. ach_101 -> 101) da idući bude po redu
+    const existingNumbers = achievementsList
+      .map(a => {
+        const match = a.id?.match(/ach_(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(n => !isNaN(n));
+
+    const maxNum = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 100;
+    const nextNumber = Math.max(maxNum + 1, 101);
+
     const item = {
-      id: `ach_${Date.now()}`,
+      id: `ach_${nextNumber}`,
       title: newAchData.title.trim(),
       desc: newAchData.desc.trim(),
       icon: newAchData.icon || '🏅',
@@ -215,11 +238,36 @@ export default function AdminPanel() {
       points: Number(newAchData.points) || 10
     };
 
-    setAchievementsList([item, ...achievementsList]);
+    setAchievementsList(prev => [item, ...prev]);
     await saveAchievementToFirebase(item);
     setNewAchData({ title: '', desc: '', icon: '🏅', tier: 'BRONZE', points: 10 });
     setActiveAdminTab('ach_assign');
   };
+
+  // 👈 UBACI OVE DVIJE FUNKCIJE ODMAH ISPOD:
+  const handleStartEditAch = (ach) => {
+    setEditingAchId(ach.id);
+    setEditAchData({
+      title: ach.title || '',
+      desc: ach.desc || '',
+      icon: ach.icon || '🏅',
+      tier: ach.tier || 'BRONZE',
+      points: ach.points || 10
+    });
+  };
+
+  const handleSaveEditAch = async (achId) => {
+    const updatedItem = {
+      id: achId,
+      ...editAchData,
+      points: Number(editAchData.points) || 10
+    };
+
+    setAchievementsList(prev => prev.map(a => a.id === achId ? updatedItem : a));
+    await saveAchievementToFirebase(updatedItem);
+    setEditingAchId(null);
+  };
+
 
   const handleDeleteAch = async (id) => {
     if (!window.confirm('Sigurno želiš trajno obrisati ovo postignuće s Firebasea?')) return;
@@ -231,26 +279,36 @@ export default function AdminPanel() {
     if (!currentSelectedProfile) return;
 
     const currentProfileKey = currentSelectedProfile.id || currentSelectedProfile.name;
-    const currentAchs = Array.isArray(currentSelectedProfile.achievements) ? [...currentSelectedProfile.achievements] : [];
-    const updatedAchs = currentAchs.includes(achId) ? currentAchs.filter(id => id !== achId) : [...currentAchs, achId];
+    const currentAchs = Array.isArray(currentSelectedProfile.achievements) ? currentSelectedProfile.achievements : [];
+    const updatedAchs = currentAchs.includes(achId)
+      ? currentAchs.filter(id => id !== achId)
+      : [...currentAchs, achId];
 
-    const updatedProfiles = profiles.map(p => (p.id || p.name) === currentProfileKey ? { ...p, achievements: updatedAchs } : p);
+    // Ažuriraj listu profila u adminu
+    const updatedProfiles = profiles.map(p =>
+      (p.id || p.name) === currentProfileKey ? { ...p, achievements: updatedAchs } : p
+    );
     setProfiles(updatedProfiles);
     localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedProfiles));
 
+    // Ažuriraj aktivni profil igrača (localStorage)
     const activeRaw = localStorage.getItem('mlin_user_profile');
     if (activeRaw) {
       try {
         const parsedActive = JSON.parse(activeRaw);
         if (parsedActive.id === currentSelectedProfile.id || parsedActive.name === currentSelectedProfile.name) {
-          localStorage.setItem('mlin_user_profile', JSON.stringify({ ...parsedActive, achievements: updatedAchs }));
-          window.dispatchEvent(new Event('storage'));
+          const updatedActive = { ...parsedActive, achievements: updatedAchs };
+          localStorage.setItem('mlin_user_profile', JSON.stringify(updatedActive));
         }
       } catch (err) {
-        console.warn("Greška pri ažuriranju mlin_user_profile:", err);
+        console.warn('Greška pri ažuriranju mlin_user_profile:', err);
       }
     }
 
+    // Obavezno osvježi storage event da cijela aplikacija / glavni izbornik povuče nove značke
+    window.dispatchEvent(new Event('storage'));
+
+    // Spremi na Firebase ako profil ima ID
     if (currentSelectedProfile.id && db) {
       try {
         await updateDoc(doc(db, 'profiles', currentSelectedProfile.id), { achievements: updatedAchs });
@@ -258,6 +316,7 @@ export default function AdminPanel() {
     }
   };
 
+  // --- LOGIKA ZA PROFILE ---
   const filteredCountries = countrySearch.trim()
     ? ALL_COUNTRIES.filter(c =>
       c.code.toLowerCase().includes(countrySearch.trim().toLowerCase()) ||
@@ -317,7 +376,7 @@ export default function AdminPanel() {
         sessionStorage.setItem('mlin_my_color', myColor);
         navigate(`/game/${gameId}`);
       },
-      (gameId) => console.log("Čekamo protivnika u sobi:", gameId)
+      (gameId) => console.log('Čekamo protivnika u sobi:', gameId)
     );
   };
 
@@ -361,17 +420,20 @@ export default function AdminPanel() {
 
       const savedActive = localStorage.getItem('mlin_user_profile');
       if (savedActive) {
-        const parsed = JSON.parse(savedActive);
-        const editedPlayer = updated.find(p => p.id === editingId);
-        if (parsed.name === editedPlayer.name || editingId === 'admin-ivica') {
-          localStorage.setItem('mlin_user_profile', JSON.stringify({
-            ...parsed,
-            name: editedPlayer.name,
-            avatar: editedPlayer.avatar,
-            country: editedPlayer.country,
-            bio: editedPlayer.bio
-          }));
-        }
+        try {
+          const parsed = JSON.parse(savedActive);
+          const editedPlayer = updated.find(p => p.id === editingId);
+          if (editedPlayer && (parsed.id === editingId || parsed.name === editedPlayer.name || editingId === 'admin-ivica')) {
+            localStorage.setItem('mlin_user_profile', JSON.stringify({
+              ...parsed,
+              name: editedPlayer.name,
+              avatar: editedPlayer.avatar,
+              country: editedPlayer.country,
+              bio: editedPlayer.bio
+            }));
+            window.dispatchEvent(new Event('storage'));
+          }
+        } catch (err) { }
       }
     } else {
       const newProfile = {
@@ -383,6 +445,7 @@ export default function AdminPanel() {
         points: 0,
         wins: 0,
         losses: 0,
+        matchHistory: [],
         achievements: []
       };
       const updated = [...profiles, newProfile];
@@ -408,9 +471,44 @@ export default function AdminPanel() {
         country: country.trim().toUpperCase() || 'HR',
         points: 0,
         wins: 0,
-        losses: 0
+        losses: 0,
+        matchHistory: [],
+        achievements: []
       });
     }
+  };
+
+  const handleResetAllProfiles = () => {
+    if (!window.confirm('Jesi li siguran? Ovo će resetirati bodove, pobjede, poraze i postignuća za SVE profile na 0!')) return;
+
+    const resetList = profiles.map(p => ({
+      ...p,
+      points: 0,
+      wins: 0,
+      losses: 0,
+      matchHistory: [],
+      achievements: []
+    }));
+
+    setProfiles(resetList);
+    localStorage.setItem('mlin_admin_profiles', JSON.stringify(resetList));
+
+    const activeRaw = localStorage.getItem('mlin_user_profile');
+    if (activeRaw) {
+      try {
+        const parsedActive = JSON.parse(activeRaw);
+        localStorage.setItem('mlin_user_profile', JSON.stringify({
+          ...parsedActive,
+          points: 0,
+          wins: 0,
+          losses: 0,
+          matchHistory: [],
+          achievements: []
+        }));
+      } catch (err) { }
+    }
+
+    window.dispatchEvent(new Event('storage'));
   };
 
   const toggleSelectDelete = (id) => {
@@ -431,24 +529,49 @@ export default function AdminPanel() {
     }
   };
 
-return (
+  return (
     <div style={{ minHeight: '100vh', width: '100%', color: '#f8fafc', fontFamily: 'system-ui, sans-serif' }}>
 
-      {/* ==================== LIJEVI IZBORNIK (OD RUBA EKRANA DO LIJEVE VERTIKALNE CRTE) ==================== */}
+      {/* ==================== GUMB ZA OTVARANJE / ZATVARANJE MENIJA ==================== */}
+      <button
+        type="button"
+        onClick={() => setIsSidebarOpen(prev => !prev)}
+        style={{
+          position: 'fixed',
+          top: '16px',
+          left: isSidebarOpen ? `calc(${SIDEBAR_WIDTH} + 14px)` : '16px',
+          zIndex: 200,
+          backgroundColor: '#1e293b',
+          color: '#fbbf24',
+          border: '1px solid #334155',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          fontSize: '0.82rem',
+          fontWeight: 'bold',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          transition: 'left 0.3s ease'
+        }}
+      >
+        {isSidebarOpen ? '✕ Zatvori' : '☰ Meni'}
+      </button>
+
+      {/* ==================== LIJEVI IZBORNIK (KLIZNI SIDEBAR) ==================== */}
       <aside style={{
         position: 'fixed',
         top: 0,
         left: 0,
         bottom: 0,
-        // Dinamički se širi točno od lijevog ruba ekrana do lijeve vertikalne crte glavnog kontejnera!
-        width: 'max(220px, calc((100vw - 1130px) / 2))',
+        width: SIDEBAR_WIDTH,
         backgroundColor: '#090f1d',
         borderRight: '1px solid #1e293b',
         display: 'flex',
         flexDirection: 'column',
-        zIndex: 100,
-        boxShadow: '4px 0 20px rgba(0,0,0,0.5)',
-        boxSizing: 'border-box'
+        zIndex: 150,
+        boxShadow: isSidebarOpen ? '4px 0 20px rgba(0,0,0,0.5)' : 'none',
+        boxSizing: 'border-box',
+        transform: isSidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 0.3s ease'
       }}>
         {/* Zaglavlje sidebara */}
         <div style={{ padding: '20px 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
@@ -499,14 +622,13 @@ return (
                         onClick={() => {
                           if (item.id !== 'profiles_create' && editingId) handleCancelEdit();
                           setActiveAdminTab(item.id);
+                          if (window.innerWidth < 768) setIsSidebarOpen(false);
                         }}
                         style={{
                           textAlign: 'left',
                           padding: '10px 14px',
                           borderRadius: '8px',
-                          borderTop: 'none',
-                          borderRight: 'none',
-                          borderBottom: 'none',
+                          border: 'none',
                           borderLeft: isActive ? '4px solid #3b82f6' : '4px solid transparent',
                           backgroundColor: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
                           color: isActive ? '#60a5fa' : '#cbd5e1',
@@ -533,14 +655,14 @@ return (
         </div>
       </aside>
 
-      {/* ==================== SREDIŠNJI PROSTOR (TOČNO U SREDINI IZMEĐU VERTIKALNIH CRTA) ==================== */}
+      {/* ==================== SREDIŠNJI PROSTOR (CENTRIRANO) ==================== */}
       <div style={{
         width: '100%',
         minHeight: '100vh',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'flex-start',
-        padding: '40px 24px',
+        padding: '56px 24px 40px',
         boxSizing: 'border-box'
       }}>
         <main style={{ width: '100%', maxWidth: '880px', margin: '0 auto' }}>
@@ -558,7 +680,7 @@ return (
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     onClick={() => { handleCancelEdit(); setActiveAdminTab('profiles_create'); }}
@@ -568,13 +690,23 @@ return (
                   </button>
 
                   {!isDeleteMode ? (
-                    <button
-                      type="button"
-                      onClick={() => { handleCancelEdit(); setIsDeleteMode(true); }}
-                      style={S.btn('#ef4444')}
-                    >
-                      🗑️ Obriši profile
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleResetAllProfiles}
+                        style={S.btn('#d97706')}
+                        title="Resetiraj bodove, pobjede, poraze i postignuća za sve igrače"
+                      >
+                        🔄 Resetiraj na 0
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { handleCancelEdit(); setIsDeleteMode(true); }}
+                        style={S.btn('#ef4444')}
+                      >
+                        🗑️ Obriši profile
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button type="button" onClick={handleConfirmDelete} style={S.btn('#dc2626')}>
@@ -613,10 +745,7 @@ return (
                         padding: '14px',
                         backgroundColor: isSelected ? '#450a0a' : (isIvica ? '#1e3a5f' : '#1e293b'),
                         borderRadius: '10px',
-                        borderTop: `1px solid ${borderColor}`,
-                        borderRight: `1px solid ${borderColor}`,
-                        borderBottom: `1px solid ${borderColor}`,
-                        borderLeft: `1px solid ${borderColor}`,
+                        border: `1px solid ${borderColor}`,
                         cursor: (isDeleteMode && isIvica) ? 'default' : 'pointer',
                         opacity: (isDeleteMode && isIvica) ? 0.6 : 1,
                         userSelect: 'none',
@@ -699,7 +828,7 @@ return (
           {/* ==================================================================== */}
           {activeAdminTab === 'profiles_create' && (
             <div style={S.card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
                 <h2 style={{ margin: 0, color: editingId ? '#f59e0b' : '#38bdf8' }}>
                   {editingId ? '✏️ Uredi postojeći profil' : '➕ Novi igrač — Kreiraj profil'}
                 </h2>
@@ -924,6 +1053,7 @@ return (
                 <div style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>⏳ Učitavanje kataloga postignuća...</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '62vh', overflowY: 'auto', paddingRight: '6px' }}>
+
                   {achievementsList
                     .filter(a => {
                       const matchesTier = achTierFilter === 'ALL' || a.tier === achTierFilter;
@@ -936,55 +1066,114 @@ return (
                       const isAssigned = userAchs.includes(ach.id);
                       const tierData = ACHIEVEMENT_TIERS[ach.tier] || ACHIEVEMENT_TIERS.BRONZE;
                       const outerBorder = isAssigned ? '#22c55e' : '#334155';
+                      const isEditing = editingAchId === ach.id;
 
                       return (
                         <div
                           key={ach.id}
                           style={{
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
+                            flexDirection: 'column',
                             padding: '10px 14px',
                             borderRadius: '8px',
-                            background: isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b',
-                            borderTop: `1px solid ${outerBorder}`,
-                            borderRight: `1px solid ${outerBorder}`,
-                            borderBottom: `1px solid ${outerBorder}`,
-                            borderLeft: `5px solid ${tierData.border}`
+                            background: isEditing ? '#1e293b' : (isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b'),
+                            border: isEditing ? '1px solid #fbbf24' : `1px solid ${outerBorder}`,
+                            borderLeft: `5px solid ${tierData.border}`,
+                            gap: '10px'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <span style={{ fontSize: '1.5rem', minWidth: '34px', textAlign: 'center' }}>{ach.icon || '🏅'}</span>
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{ach.title}</strong>
-                                <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: tierData.border, color: '#000', fontWeight: 'bold' }}>
-                                  {tierData.label}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: '#fbbf24', fontWeight: 'bold' }}>+{ach.points} B</span>
+                          {isEditing ? (
+                            /* INLINE FORMA ZA UREĐIVANJE */
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <input
+                                  type="text"
+                                  value={editAchData.icon}
+                                  onChange={(e) => setEditAchData({ ...editAchData, icon: e.target.value })}
+                                  style={{ ...S.input, width: '55px', textAlign: 'center' }}
+                                />
+                                <input
+                                  type="text"
+                                  value={editAchData.title}
+                                  onChange={(e) => setEditAchData({ ...editAchData, title: e.target.value })}
+                                  style={{ ...S.input, flex: 2, minWidth: '160px' }}
+                                  placeholder="Naziv"
+                                />
+                                <select
+                                  value={editAchData.tier}
+                                  onChange={(e) => setEditAchData({ ...editAchData, tier: e.target.value })}
+                                  style={{ ...S.input, flex: 1, minWidth: '110px' }}
+                                >
+                                  {Object.keys(ACHIEVEMENT_TIERS).map(k => (
+                                    <option key={k} value={k}>{ACHIEVEMENT_TIERS[k].label}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="number"
+                                  value={editAchData.points}
+                                  onChange={(e) => setEditAchData({ ...editAchData, points: e.target.value })}
+                                  style={{ ...S.input, width: '80px' }}
+                                />
                               </div>
-                              <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc}</div>
+                              <input
+                                type="text"
+                                value={editAchData.desc}
+                                onChange={(e) => setEditAchData({ ...editAchData, desc: e.target.value })}
+                                style={S.input}
+                                placeholder="Opis uvjeta..."
+                              />
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                <button type="button" onClick={() => handleSaveEditAch(ach.id)} style={S.btn('#10b981')}>💾 Spremi</button>
+                                <button type="button" onClick={() => setEditingAchId(null)} style={S.btn('#64748b')}>✕ Odustani</button>
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            /* STANDARDNI PRIKAZ */
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span style={{ fontSize: '1.5rem', minWidth: '34px', textAlign: 'center' }}>{ach.icon || '🏅'}</span>
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{ach.title}</strong>
+                                    <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: tierData.border, color: '#000', fontWeight: 'bold' }}>
+                                      {tierData.label}
+                                    </span>
+                                    <span style={{ fontSize: '0.75rem', color: '#fbbf24', fontWeight: 'bold' }}>+{ach.points} B</span>
+                                    <span style={{ fontSize: '0.65rem', color: '#64748b' }}>({ach.id})</span>
+                                  </div>
+                                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc}</div>
+                                </div>
+                              </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleAchievementForUser(ach.id)}
-                              style={S.btn(isAssigned ? '#ef4444' : '#22c55e')}
-                            >
-                              {isAssigned ? '✖ Oduzmi igraču' : '✔ Dodijeli igraču'}
-                            </button>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleAchievementForUser(ach.id)}
+                                  style={S.btn(isAssigned ? '#ef4444' : '#22c55e')}
+                                >
+                                  {isAssigned ? '✖ Oduzmi' : '✔ Dodijeli'}
+                                </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteAch(ach.id)}
-                              title="Trajno obriši s Firebasea"
-                              style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }}
-                            >
-                              🗑️
-                            </button>
-                          </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditAch(ach)}
+                                  title="Uredi postignuće"
+                                  style={{ background: '#334155', border: '1px solid #475569', color: '#fbbf24', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer', fontWeight: 'bold' }}
+                                >
+                                  ✏️
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteAch(ach.id)}
+                                  title="Trajno obriši s Firebasea"
+                                  style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }}
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -998,7 +1187,7 @@ return (
           {/* ==================================================================== */}
           {activeAdminTab === 'ach_create' && (
             <div style={S.card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h2 style={{ color: '#fbbf24', margin: 0 }}>✨ Stvori novo postignuće</h2>
                   <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
@@ -1011,7 +1200,7 @@ return (
               </div>
 
               <form onSubmit={handleAddNewAchievement} style={S.subCard}>
-                <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 180px 120px', gap: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px', marginBottom: '16px' }}>
                   <div>
                     <label style={S.label}>Ikona</label>
                     <input
@@ -1021,7 +1210,7 @@ return (
                       style={{ ...S.input, textAlign: 'center', fontSize: '1.3rem', padding: '5px' }}
                     />
                   </div>
-                  <div>
+                  <div style={{ gridColumn: 'span 2' }}>
                     <label style={S.label}>Naziv postignuća</label>
                     <input
                       type="text"
@@ -1079,14 +1268,14 @@ return (
           {/* ==================================================================== */}
           {activeAdminTab === 'scoring' && (
             <div style={S.card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h2 style={{ color: '#fbbf24', margin: 0 }}>⚖️ Upravljanje Sustavom Bodovanja</h2>
                   <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
                     Definiraj ili prilagodi pravila bodovanja koja se prikazuju igračima.
                   </p>
                 </div>
-                <button type="button" onClick={handleResetScoringRules} style={S.btn('#334155', '#cbd5e1')}>
+                <button type="button" onClick={() => saveRulesToStorage(DEFAULT_SCORING_RULES)} style={S.btn('#334155', '#cbd5e1')}>
                   🔄 Vrati na zadano
                 </button>
               </div>
@@ -1095,22 +1284,22 @@ return (
                 <input
                   type="text"
                   placeholder="Ikona"
-                  value={newRuleIcon}
-                  onChange={(e) => setNewRuleIcon(e.target.value)}
+                  value={newRule.icon}
+                  onChange={(e) => setNewRule({ ...newRule, icon: e.target.value })}
                   style={{ ...S.input, width: '65px', backgroundColor: '#1e293b', textAlign: 'center' }}
                 />
                 <input
                   type="text"
                   placeholder="Naziv pravila (npr. Pobjeda)..."
-                  value={newRuleTitle}
-                  onChange={(e) => setNewRuleTitle(e.target.value)}
+                  value={newRule.title}
+                  onChange={(e) => setNewRule({ ...newRule, title: e.target.value })}
                   style={{ ...S.input, flex: 2, minWidth: '180px', backgroundColor: '#1e293b' }}
                 />
                 <input
                   type="text"
                   placeholder="Vrijednost (npr. +10 Bodova)..."
-                  value={newRuleValue}
-                  onChange={(e) => setNewRuleValue(e.target.value)}
+                  value={newRule.value}
+                  onChange={(e) => setNewRule({ ...newRule, value: e.target.value })}
                   style={{ ...S.input, flex: 2, minWidth: '180px', backgroundColor: '#1e293b' }}
                 />
                 <button type="submit" style={S.btn('#10b981')}>
@@ -1120,7 +1309,7 @@ return (
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {scoringRules.map((rule) => {
-                  const isEditing = editingRuleId === rule.id;
+                  const isEditing = editingRule?.id === rule.id;
                   return (
                     <div
                       key={rule.id}
@@ -1139,24 +1328,24 @@ return (
                         <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                           <input
                             type="text"
-                            value={editRuleIcon}
-                            onChange={(e) => setEditRuleIcon(e.target.value)}
+                            value={editingRule.icon}
+                            onChange={(e) => setEditingRule({ ...editingRule, icon: e.target.value })}
                             style={{ ...S.input, width: '55px', textAlign: 'center', border: '1px solid #fbbf24' }}
                           />
                           <input
                             type="text"
-                            value={editRuleTitle}
-                            onChange={(e) => setEditRuleTitle(e.target.value)}
+                            value={editingRule.title}
+                            onChange={(e) => setEditingRule({ ...editingRule, title: e.target.value })}
                             style={{ ...S.input, flex: 1, border: '1px solid #fbbf24' }}
                           />
                           <input
                             type="text"
-                            value={editRuleValue}
-                            onChange={(e) => setEditRuleValue(e.target.value)}
+                            value={editingRule.value}
+                            onChange={(e) => setEditingRule({ ...editingRule, value: e.target.value })}
                             style={{ ...S.input, flex: 1.5, border: '1px solid #fbbf24' }}
                           />
-                          <button type="button" onClick={() => handleSaveEditRule(rule.id)} style={S.btn('#10b981')}>💾</button>
-                          <button type="button" onClick={() => setEditingRuleId(null)} style={S.btn('#64748b')}>✕</button>
+                          <button type="button" onClick={handleSaveEditRule} style={S.btn('#10b981')}>💾</button>
+                          <button type="button" onClick={() => setEditingRule(null)} style={S.btn('#64748b')}>✕</button>
                         </div>
                       ) : (
                         <>
@@ -1166,7 +1355,7 @@ return (
                             <span style={{ color: '#94a3b8' }}>{rule.value}</span>
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
-                            <button type="button" onClick={() => handleStartEditRule(rule)} style={S.btn('#f59e0b')}>✏️</button>
+                            <button type="button" onClick={() => setEditingRule({ ...rule })} style={S.btn('#f59e0b')}>✏️</button>
                             <button type="button" onClick={() => handleDeleteRule(rule.id)} style={S.btn('#ef4444')}>✕</button>
                           </div>
                         </>
