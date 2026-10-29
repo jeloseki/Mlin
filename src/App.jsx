@@ -7,7 +7,7 @@ import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
@@ -251,6 +251,92 @@ const playAudioEffect = (type, soundEnabled = true) => {
   } catch (e) { }
 };
 
+// Pomoćna funkcija koja čita i spaja profil iz mlin_user_profile i mlin_admin_profiles
+const loadSyncedProfile = () => {
+  let userProf = {
+    name: 'Igrač 1',
+    avatar: '🦁',
+    bio: 'Spreman za igru!',
+    points: 0,
+    wins: 0,
+    losses: 0,
+    matchHistory: [],
+    achievements: []
+  };
+
+  try {
+    const savedUser = localStorage.getItem('mlin_user_profile');
+    if (savedUser) {
+      userProf = { ...userProf, ...JSON.parse(savedUser) };
+    }
+  } catch (e) { }
+
+  // Provjeri postoji li taj igrač u mlin_admin_profiles i spoji njegova postignuća
+  try {
+    const savedAdminProfiles = localStorage.getItem('mlin_admin_profiles');
+    if (savedAdminProfiles) {
+      const adminList = JSON.parse(savedAdminProfiles);
+      if (Array.isArray(adminList)) {
+        const match = adminList.find(
+          p => (p.id && p.id === userProf.id) || (p.name && userProf.name && p.name.toLowerCase() === userProf.name.toLowerCase())
+        );
+        if (match) {
+          const mergedAchs = Array.from(new Set([
+            ...(Array.isArray(userProf.achievements) ? userProf.achievements : []),
+            ...(Array.isArray(match.achievements) ? match.achievements : [])
+          ]));
+          userProf = {
+            ...userProf,
+            id: userProf.id || match.id,
+            achievements: mergedAchs
+          };
+        }
+      }
+    }
+  } catch (e) { }
+
+  if (!Array.isArray(userProf.achievements)) {
+    userProf.achievements = [];
+  }
+
+  return userProf;
+};
+
+// Pomoćna funkcija koja skuplja SVA postignuća iz svih mogućih izvora u localStorageu + osnovni katalog
+const loadFullAchievementsCatalog = (extraList = []) => {
+  let base = [];
+  try {
+    const stored = getStoredAchievements();
+    if (Array.isArray(stored)) base = [...stored];
+  } catch (e) { }
+
+  const storageKeys = ['mlin_admin_achievements', 'mlin_achievements', 'achievements'];
+  storageKeys.forEach(key => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          base = [...base, ...parsed];
+        }
+      }
+    } catch (e) { }
+  });
+
+  if (Array.isArray(extraList)) {
+    base = [...base, ...extraList];
+  }
+
+  const map = new Map();
+  base.forEach(item => {
+    if (item && item.id) {
+      map.set(String(item.id).trim(), item);
+    }
+  });
+
+  return Array.from(map.values());
+};
+
 export default function App() {
   const location = useLocation();
   const onlineGameId = location.pathname.startsWith('/game/')
@@ -269,47 +355,57 @@ export default function App() {
 
   const [leaderboard, setLeaderboard] = useState([]);
 
-  const [profile, setProfile] = useState(() => {
-    const saved = localStorage.getItem('mlin_user_profile');
-    return saved ? JSON.parse(saved) : {
-      name: 'Igrač 1',
-      avatar: '🦁',
-      bio: 'Spreman za igru!',
-      points: 0,
-      wins: 0,
-      losses: 0,
-      matchHistory: []
-    };
-  });
+  const [profile, setProfile] = useState(() => loadSyncedProfile());
+  const [achievementsCatalog, setAchievementsCatalog] = useState(() => loadFullAchievementsCatalog());
+  const [achievementFilter, setAchievementFilter] = useState('ALL');
 
-  // Sinkronizacija profila iz localStorage-a
-  useEffect(() => {
-    const syncProfileFromStorage = () => {
+  // Helper za ručnu promjenu profila iz UI-a (ime, bio, avatar) koji odmah sprema u localStorage
+  const updateProfileAndSave = (updater) => {
+    setProfile(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
       try {
-        const saved = localStorage.getItem('mlin_user_profile');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          setProfile(parsed);
-        }
-      } catch (err) {
-        console.error("Greška pri sinkronizaciji profila:", err);
+        localStorage.setItem('mlin_user_profile', JSON.stringify(next));
+      } catch (e) { }
+      return next;
+    });
+  };
+
+  // Sinkronizacija profila i kataloga postignuća (iz localStoragea + Firebasea)
+  useEffect(() => {
+    const syncAll = async () => {
+      const freshProfile = loadSyncedProfile();
+      setProfile(freshProfile);
+
+      // Učitaj iz localStoragea
+      const localCat = loadFullAchievementsCatalog();
+      setAchievementsCatalog(localCat);
+
+      // Povuci i s Firebasea ako su custom postignuća spremljena u kolekciju 'achievements'
+      if (db) {
+        try {
+          const snap = await getDocs(collection(db, 'achievements'));
+          const fbList = [];
+          snap.forEach(d => fbList.push({ id: d.id, ...d.data() }));
+          if (fbList.length > 0) {
+            localStorage.setItem('mlin_admin_achievements', JSON.stringify(fbList));
+            setAchievementsCatalog(loadFullAchievementsCatalog(fbList));
+          }
+        } catch (e) { }
       }
     };
 
-    // Provjeri pri svakom montiranju / fokusu prozora
-    syncProfileFromStorage();
-    window.addEventListener('storage', syncProfileFromStorage);
-    window.addEventListener('focus', syncProfileFromStorage);
+    syncAll();
+    window.addEventListener('storage', syncAll);
+    window.addEventListener('focus', syncAll);
 
     return () => {
-      window.removeEventListener('storage', syncProfileFromStorage);
-      window.removeEventListener('focus', syncProfileFromStorage);
+      window.removeEventListener('storage', syncAll);
+      window.removeEventListener('focus', syncAll);
     };
-  }, []);
+  }, [currentScreen, location.pathname]);
 
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
-
 
   // AI STANJA
   const [isAIMode, setIsAIMode] = useState(false);
@@ -347,16 +443,6 @@ export default function App() {
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
-  // Učitavanje postignuća
-  const [achievementsCatalog, setAchievementsCatalog] = useState(() => {
-    try {
-      return getStoredAchievements();
-    } catch (e) {
-      return [];
-    }
-  });
-  const [achievementFilter, setAchievementFilter] = useState('ALL');
-
   // Učitavanje pravila bodovanja (iz admin panela ili zadani niz)
   const DEFAULT_SCORING_RULES = [
     { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
@@ -389,12 +475,7 @@ export default function App() {
     return () => window.removeEventListener('storage', refreshRules);
   }, [currentScreen]);
 
-  // 1. Sinkronizacija profila u localStorage
-  useEffect(() => {
-    localStorage.setItem('mlin_user_profile', JSON.stringify(profile));
-  }, [profile]);
-
-  // 2. Ako smo u online meču, automatski gasi AI i odmah prebaci na PLAY ekran
+  // Ako smo u online meču, automatski gasi AI i odmah prebaci na PLAY ekran
   useEffect(() => {
     if (onlineGameId) {
       setIsAIMode(false);
@@ -403,7 +484,7 @@ export default function App() {
     }
   }, [onlineGameId]);
 
-  // 3. Firestore sinkronizacija u stvarnom vremenu
+  // Firestore sinkronizacija u stvarnom vremenu
   useEffect(() => {
     if (!onlineGameId) return;
 
@@ -415,7 +496,6 @@ export default function App() {
         if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
         if (data.unplaced) setUnplaced(data.unplaced);
 
-        // Sinkroniziraj status pobjednika na oba ekrana:
         if (data.winner && !winner) {
           setWinner(data.winner);
           const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
@@ -440,7 +520,7 @@ export default function App() {
     return () => unsubscribe();
   }, [onlineGameId]);
 
-  // 4. Globalni slušač za pomicanje miša
+  // Globalni slušač za pomicanje miša
   useEffect(() => {
     const handleMouseMove = (e) => {
       setMousePos({ x: e.clientX, y: e.clientY });
@@ -458,7 +538,7 @@ export default function App() {
     };
   }, []);
 
-  // 5. AI POTEZ AUTOMATIKA
+  // AI POTEZ AUTOMATIKA
   useEffect(() => {
     if (!isAIMode || onlineGameId || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
 
@@ -493,7 +573,7 @@ export default function App() {
     }
   }, [turn, mustRemove, board, unplaced, isAIMode, onlineGameId, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
 
-  // 6. ŠAHOVSKI SAT
+  // ŠAHOVSKI SAT
   useEffect(() => {
     if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
 
@@ -515,7 +595,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [gameCategory, currentScreen, setupStep, winner, turn]);
 
-  // 7. KONTROLA IGRE TIPKOVNICOM
+  // KONTROLA IGRE TIPKOVNICOM
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
@@ -557,7 +637,7 @@ export default function App() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setProfile((prev) => ({ ...prev, avatar: reader.result }));
+        updateProfileAndSave((prev) => ({ ...prev, avatar: reader.result }));
         setProfileTab('STATS');
       };
       reader.readAsDataURL(file);
@@ -621,7 +701,7 @@ export default function App() {
   const handleProceedToCoinToss = async () => {
     const p1Data = await getOrCreateProfile(p1Name);
     if (p1Data) {
-      setProfile(prev => ({
+      updateProfileAndSave(prev => ({
         ...prev,
         name: p1Data.name,
         points: p1Data.rankPoints || 0,
@@ -676,11 +756,9 @@ export default function App() {
   };
 
   const handleColorSelect = (color) => {
-    // 1. Provjeravamo tko je birao boju na temelju pobjednika novčića
     const p1Color = coinWinner === 1 ? color : (color === 'WHITE' ? 'BLACK' : 'WHITE');
     const p2Color = coinWinner === 2 ? color : (color === 'WHITE' ? 'BLACK' : 'WHITE');
 
-    // 2. Dodjeljujemo figure točno onom igraču koji ima tu boju
     setPlayers({
       WHITE: {
         name: p1Color === 'WHITE' ? p1Name : p2Name,
@@ -692,16 +770,13 @@ export default function App() {
       }
     });
 
-    // 3. Ako igramo protiv AI-ja, botu dajemo njegovu boju
     if (isAIMode) {
       setAiColor(p2Color);
     }
 
-    // 4. Postavke vremena ako je natjecateljski mod
     const initialSeconds = gameCategory === 'COMPETITIVE' ? timeControl : null;
     setTimeLeft({ WHITE: initialSeconds, BLACK: initialSeconds });
 
-    // Bijeli uvijek vuče prvi
     setTurn('WHITE');
     setSetupStep('PLAY');
   };
@@ -711,7 +786,6 @@ export default function App() {
   const handleGameEnd = (winningColor) => {
     setWinner(winningColor);
 
-    // Sinkroniziraj pobjedu s Firebaseom kako bi oba igrača vidjela kraj:
     if (onlineGameId) {
       updateDoc(doc(db, "games", onlineGameId), {
         winner: winningColor
@@ -745,7 +819,6 @@ export default function App() {
       category: gameCategory
     };
 
-    // 1. Pripremi profil s osvježenim statistikama meča
     const baseUpdatedProfile = {
       ...profile,
       points: newPoints,
@@ -754,7 +827,6 @@ export default function App() {
       matchHistory: [newMatch, ...(profile.matchHistory || []).slice(0, 9)]
     };
 
-    // 2. Evaluacija svih postignuća prema podacima iz meča
     const finalProfile = evaluateGameAchievements(baseUpdatedProfile, {
       isWin: isUserWinner,
       isAIMode: isAIMode,
@@ -766,8 +838,7 @@ export default function App() {
       totalTurns: typeof moveCount !== 'undefined' ? moveCount : 40
     });
 
-    // 3. Postavi u React stanje i spremi meč
-    setProfile(finalProfile);
+    updateProfileAndSave(finalProfile);
     saveMatchHistory(newMatch);
 
     if (!isAIMode) {
@@ -784,7 +855,6 @@ export default function App() {
 
   const executePlaceOrMove = (nodeIndex, customSource = null) => {
     if (winner) return;
-    // Zabrana poteza ako igramo online meč, a nije naš red
     if (onlineGameId && turn !== myColor) return;
 
     const opponent = turn === 'WHITE' ? 'BLACK' : 'WHITE';
@@ -810,18 +880,14 @@ export default function App() {
       setSelectedNode(null);
       setActiveHeldPiece(null);
 
-      // PROVJERA KRAJA IGRE
       const isOpponentDefeated = unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3;
 
       if (isOpponentDefeated) {
-        // 1. Prvo pošalji ploču s uklonjenom figurom u bazu
         syncGameState(newBoard, turn, { mustRemove: false, winner: turn });
-        // 2. Zatim pokreni lokalnu rutinu završetka meča
         handleGameEnd(turn);
         return;
       }
 
-      // AKO IGRA JOŠ TRAJE, PREDAJ POTEZ PROTIVNIKU
       setTimeout(() => {
         syncGameState(newBoard, opponent, { mustRemove: false });
       }, 50);
@@ -850,12 +916,7 @@ export default function App() {
           unplaced: nextUnplaced
         });
       } else {
-        // Provjera legalnih poteza vrijedi TEK u 2. fazi igre (kad su sve figure na ploči)
         const isPlacementPhaseOver = nextUnplaced.WHITE === 0 && nextUnplaced.BLACK === 0;
-
-        const opponentPiecesCount = newBoard.filter(cell => cell === opponent).length;
-        const isOpponentFlying = opponentPiecesCount === 3;
-
         const oppCount = newBoard.filter(cell => cell === opponent).length;
         if (isPlacementPhaseOver && (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3))) {
           handleGameEnd(turn);
@@ -998,7 +1059,17 @@ export default function App() {
           </div>
           <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
-            <button className="btn-menu" onClick={() => { setProfileTab('STATS'); setCurrentScreen('PROFILE'); }}>{t.profile}</button>
+            <button
+              className="btn-menu"
+              onClick={() => {
+                setProfile(loadSyncedProfile());
+                setAchievementsCatalog(loadFullAchievementsCatalog());
+                setProfileTab('STATS');
+                setCurrentScreen('PROFILE');
+              }}
+            >
+              {t.profile}
+            </button>
 
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
@@ -1010,10 +1081,8 @@ export default function App() {
             <button
               className="btn-menu"
               onClick={() => {
-                try {
-                  const saved = localStorage.getItem('mlin_user_profile');
-                  if (saved) setProfile(JSON.parse(saved));
-                } catch (e) { }
+                setProfile(loadSyncedProfile());
+                setAchievementsCatalog(loadFullAchievementsCatalog());
                 setCurrentScreen('ACHIEVEMENTS');
               }}
             >
@@ -1021,7 +1090,7 @@ export default function App() {
             </button>
 
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
-            <button className="btn-menu" onClick={() => setIsAdminOpen(true)}>⁉️ Dodajem poslije</button>
+            <button className="btn-menu" onClick={() => navigate('/admin')}>⁉️ Dodajem poslije</button>
           </div>
         </div>
       )}
@@ -1053,7 +1122,7 @@ export default function App() {
                 type="text"
                 value={profile.name}
                 maxLength={12}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                onChange={(e) => updateProfileAndSave({ ...profile, name: e.target.value })}
                 onBlur={() => setIsEditingName(false)}
                 autoFocus
                 style={{ textAlign: 'center', width: '70%', background: '#071524', color: '#fff', border: '1px solid #d4af37', borderRadius: '6px', padding: '4px' }}
@@ -1071,14 +1140,23 @@ export default function App() {
               value={profile.bio}
               maxLength={40}
               placeholder="Upišite status poruku..."
-              onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+              onChange={(e) => updateProfileAndSave({ ...profile, bio: e.target.value })}
             />
           </div>
 
           {profileTab !== 'AVATAR_SELECT' && (
             <div className="profile-tabs">
               <button className={`tab-btn ${profileTab === 'STATS' ? 'active' : ''}`} onClick={() => setProfileTab('STATS')}>{t.tabStats}</button>
-              <button className={`tab-btn ${profileTab === 'BADGES' ? 'active' : ''}`} onClick={() => setProfileTab('BADGES')}>{t.tabBadges}</button>
+              <button
+                className={`tab-btn ${profileTab === 'BADGES' ? 'active' : ''}`}
+                onClick={() => {
+                  setProfile(loadSyncedProfile());
+                  setAchievementsCatalog(loadFullAchievementsCatalog());
+                  setProfileTab('BADGES');
+                }}
+              >
+                {t.tabBadges}
+              </button>
               <button className={`tab-btn ${profileTab === 'HISTORY' ? 'active' : ''}`} onClick={() => setProfileTab('HISTORY')}>{t.tabHistory}</button>
             </div>
           )}
@@ -1095,9 +1173,21 @@ export default function App() {
           {profileTab === 'BADGES' && (
             <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
               {(() => {
-                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
-                // Pronađi sva postignuća iz kataloga koja korisnik ima otključana
-                const unlockedList = (achievementsCatalog || []).filter(ach => userAchs.includes(ach.id));
+                const liveProfile = loadSyncedProfile();
+                const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
+                const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
+
+                // Pronađi svako postignuće iz kataloga, a ako ga nekim slučajem nema u katalogu, prikaži fallback karticu da se uvijek vidi!
+                const unlockedList = userAchs.map(achId => {
+                  const found = uniqueCatalog.find(a => String(a.id).trim() === achId);
+                  if (found) return found;
+                  return {
+                    id: achId,
+                    title: `Postignuće (${achId})`,
+                    desc: 'Posebno dodijeljeno postignuće',
+                    icon: '🏅'
+                  };
+                });
 
                 if (unlockedList.length === 0) {
                   return (
@@ -1140,7 +1230,7 @@ export default function App() {
 
           {profileTab === 'HISTORY' && (
             <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {profile.matchHistory.length === 0 ? (
+              {(!profile.matchHistory || profile.matchHistory.length === 0) ? (
                 <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>
                   Nema odigranih mečeva.
                 </div>
@@ -1169,7 +1259,7 @@ export default function App() {
                     key={index}
                     className="avatar-option"
                     onClick={() => {
-                      setProfile({ ...profile, avatar: emoji });
+                      updateProfileAndSave({ ...profile, avatar: emoji });
                       setProfileTab('STATS');
                     }}
                   >
@@ -1279,115 +1369,121 @@ export default function App() {
           onClick={(e) => e.stopPropagation()}
           style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h2 className="menu-title" style={{ margin: 0 }}>🏅 Postignuća</h2>
-            <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
-              Otključano: {(profile?.achievements || []).length} / {(achievementsCatalog || []).length}
-            </div>
-          </div>
+          {(() => {
+            const liveProfile = loadSyncedProfile();
+            const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
+            const fullCat = loadFullAchievementsCatalog(achievementsCatalog);
 
-          {/* Filteri */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            {[
-              { id: 'ALL', label: 'Sve' },
-              { id: 'UNLOCKED', label: 'Otključana' },
-              { id: 'LOCKED', label: 'Zaključana' }
-            ].map(f => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setAchievementFilter(f.id)}
-                style={{
-                  background: achievementFilter === f.id ? '#3b82f6' : '#1e293b',
-                  color: achievementFilter === f.id ? '#fff' : '#94a3b8',
-                  border: '1px solid #334155',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer'
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Popis kartica postignuća */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-            {(achievementsCatalog || [])
-              .filter(ach => {
-                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
-                const isUnlocked = userAchs.includes(ach.id);
-                if (achievementFilter === 'UNLOCKED') return isUnlocked;
-                if (achievementFilter === 'LOCKED') return !isUnlocked;
-                return true;
-              })
-              .map((ach) => {
-                const userAchs = Array.isArray(profile?.achievements) ? profile.achievements : [];
-                const isUnlocked = userAchs.includes(ach.id);
-
-                // Sigurno dohvaćanje tier stila
-                const defaultTier = { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
-                const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
-
-                return (
-                  <div
-                    key={ach.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: isUnlocked ? tierInfo.bg : 'rgba(15, 23, 42, 0.6)',
-                      border: isUnlocked ? `1px solid ${tierInfo.border}` : '1px solid #334155',
-                      opacity: isUnlocked ? 1 : 0.45,
-                      filter: isUnlocked ? 'none' : 'grayscale(80%)',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <div style={{ fontSize: '1.8rem', minWidth: '40px', textAlign: 'center' }}>
-                      {ach.icon || '🏅'}
-                    </div>
-
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>
-                          {ach.title}
-                        </span>
-                        <span style={{
-                          fontSize: '0.65rem',
-                          textTransform: 'uppercase',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          background: tierInfo.border,
-                          color: '#000',
-                          fontWeight: 'bold'
-                        }}>
-                          {tierInfo.label}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>
-                        {ach.desc}
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: 'right', minWidth: '70px' }}>
-                      <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                        +{ach.points} B
-                      </div>
-                      <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-                        {isUnlocked ? (
-                          <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span>
-                        ) : (
-                          <span style={{ color: '#64748b' }}>🔒 Zaključano</span>
-                        )}
-                      </div>
-                    </div>
+            return (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h2 className="menu-title" style={{ margin: 0 }}>🏅 Postignuća</h2>
+                  <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
+                    Otključano: {userAchs.length} / {fullCat.length}
                   </div>
-                );
-              })}
-          </div>
+                </div>
+
+                {/* Filteri */}
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'ALL', label: 'Sve' },
+                    { id: 'UNLOCKED', label: 'Otključana' },
+                    { id: 'LOCKED', label: 'Zaključana' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setAchievementFilter(f.id)}
+                      style={{
+                        background: achievementFilter === f.id ? '#3b82f6' : '#1e293b',
+                        color: achievementFilter === f.id ? '#fff' : '#94a3b8',
+                        border: '1px solid #334155',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Popis kartica postignuća */}
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                  {fullCat
+                    .filter(ach => {
+                      const isUnlocked = userAchs.includes(String(ach.id).trim());
+                      if (achievementFilter === 'UNLOCKED') return isUnlocked;
+                      if (achievementFilter === 'LOCKED') return !isUnlocked;
+                      return true;
+                    })
+                    .map((ach) => {
+                      const isUnlocked = userAchs.includes(String(ach.id).trim());
+                      const defaultTier = { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
+                      const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
+
+                      return (
+                        <div
+                          key={ach.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            background: isUnlocked ? tierInfo.bg : 'rgba(15, 23, 42, 0.6)',
+                            border: isUnlocked ? `1px solid ${tierInfo.border}` : '1px solid #334155',
+                            opacity: isUnlocked ? 1 : 0.45,
+                            filter: isUnlocked ? 'none' : 'grayscale(80%)',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <div style={{ fontSize: '1.8rem', minWidth: '40px', textAlign: 'center' }}>
+                            {ach.icon || '🏅'}
+                          </div>
+
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>
+                                {ach.title || ach.name}
+                              </span>
+                              <span style={{
+                                fontSize: '0.65rem',
+                                textTransform: 'uppercase',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                background: tierInfo.border,
+                                color: '#000',
+                                fontWeight: 'bold'
+                              }}>
+                                {tierInfo.label}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>
+                              {ach.desc || ach.description}
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right', minWidth: '70px' }}>
+                            <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                              +{ach.points || 10} B
+                            </div>
+                            <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                              {isUnlocked ? (
+                                <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span>
+                              ) : (
+                                <span style={{ color: '#64748b' }}>🔒 Zaključano</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
+            );
+          })()}
 
           <button
             type="button"
@@ -1485,7 +1581,8 @@ export default function App() {
                           }}
                         >
                           {t.tails}
-                        </div>                      </div>
+                        </div>
+                      </div>
                     </div>
                     <div className="coin-choice-btns">
                       <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>

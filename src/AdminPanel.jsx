@@ -1076,9 +1076,19 @@ export default function AdminPanel() {
                             flexDirection: 'column',
                             padding: '10px 14px',
                             borderRadius: '8px',
-                            background: isEditing ? '#1e293b' : (isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b'),
-                            border: isEditing ? '1px solid #fbbf24' : `1px solid ${outerBorder}`,
-                            borderLeft: `5px solid ${tierData.border}`,
+                            backgroundColor: isEditing ? '#1e293b' : (isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b'),
+                            borderTopWidth: '1px',
+                            borderTopStyle: 'solid',
+                            borderTopColor: isEditing ? '#fbbf24' : outerBorder,
+                            borderRightWidth: '1px',
+                            borderRightStyle: 'solid',
+                            borderRightColor: isEditing ? '#fbbf24' : outerBorder,
+                            borderBottomWidth: '1px',
+                            borderBottomStyle: 'solid',
+                            borderBottomColor: isEditing ? '#fbbf24' : outerBorder,
+                            borderLeftWidth: '5px',
+                            borderLeftStyle: 'solid',
+                            borderLeftColor: tierData.border,
                             gap: '10px'
                           }}
                         >
