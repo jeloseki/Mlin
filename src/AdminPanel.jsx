@@ -8,6 +8,13 @@ import {
   saveAchievementToFirebase,
   deleteAchievementFromFirebase
 } from './achievementsData';
+import {
+  getStoredAvatars,
+  fetchAvatarsFromFirebase,
+  saveAvatarsToStorage,
+  saveAvatarToFirebase,
+  deleteAvatarFromFirebase
+} from './avatarsData';
 import { db } from './firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ALL_COUNTRIES, CountryFlag } from './countriesData';
@@ -51,6 +58,14 @@ const MENU_GROUPS = [
     items: [
       { id: 'ach_assign', label: '🎖️ Katalog i dodjela' },
       { id: 'ach_create', label: '✨ Stvori postignuće' }
+    ]
+  },
+{
+    id: 'avatars',
+    label: '🦁 Avatari (M:N)',
+    items: [
+      { id: 'avatar_assign', label: '🎭 Katalog i dodjela' },
+      { id: 'avatar_create', label: '✨ Stvori avatar' }
     ]
   },
   {
@@ -312,6 +327,105 @@ export default function AdminPanel() {
     if (currentSelectedProfile.id && db) {
       try {
         await updateDoc(doc(db, 'profiles', currentSelectedProfile.id), { achievements: updatedAchs });
+      } catch (err) { }
+    }
+  };
+
+  const handleAddNewAvatar = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!newAvatarData.name.trim() || !newAvatarData.icon.trim()) return;
+
+    // Generiraj jedinstveni ID (npr. av_81, av_82...)
+    const existingNumbers = avatarsList
+      .map(a => {
+        const match = a.id?.match(/av_(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(n => !isNaN(n));
+
+    const maxNum = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 80;
+    const nextNumber = Math.max(maxNum + 1, 81);
+
+    const item = {
+      id: `av_${nextNumber < 10 ? '0' + nextNumber : nextNumber}`,
+      name: newAvatarData.name.trim(),
+      icon: newAvatarData.icon.trim() || '🦁',
+      isDefault: false,
+      unlockHint: newAvatarData.unlockHint.trim() || 'Specijalna nagrada',
+      reqWins: Number(newAvatarData.reqWins) || 0,
+      reqMatches: Number(newAvatarData.reqMatches) || 0,
+      reqPoints: Number(newAvatarData.reqPoints) || 0
+    };
+
+    const updatedList = [item, ...avatarsList];
+    setAvatarsList(updatedList);
+    saveAvatarsToStorage(updatedList);
+    await saveAvatarToFirebase(item);
+
+    setNewAvatarData({ name: '', icon: '🦁', unlockHint: 'Osvojeno u Admin panelu', reqWins: 0, reqMatches: 0, reqPoints: 0 });
+    setActiveAdminTab('avatar_assign');
+  };
+
+  // --- STANJA: AVATARI (M:N) ---
+  const [avatarsList, setAvatarsList] = useState(() => getStoredAvatars());
+  const [avatarSearch, setAvatarSearch] = useState('');
+  const [avatarFilter, setAvatarFilter] = useState('ALL'); // 'ALL', 'DEFAULT', 'LOCKED'
+  // --- STANJE ZA NOVI AVATAR ---
+  const [newAvatarData, setNewAvatarData] = useState({ name: '', icon: '🦁', unlockHint: 'Osvojeno u Admin panelu', reqWins: 0, reqMatches: 0, reqPoints: 0 });
+
+  useEffect(() => {
+    const loadAvatars = async () => {
+      try {
+        const data = await fetchAvatarsFromFirebase();
+        if (Array.isArray(data) && data.length > 0) {
+          setAvatarsList(data);
+        }
+      } catch (err) {
+        console.warn('Greška pri učitavanju avatara:', err);
+      }
+    };
+    loadAvatars();
+  }, []);
+
+  const handleToggleAvatarForUser = async (avatarId) => {
+    if (!currentSelectedProfile) return;
+
+    const currentProfileKey = currentSelectedProfile.id || currentSelectedProfile.name;
+    const currentUnlocked = Array.isArray(currentSelectedProfile.unlockedAvatars) ? currentSelectedProfile.unlockedAvatars : [];
+    
+    // Provjeri je li avatar default (njih ne diramo jer su uvijek otključani)
+    const targetAvatar = avatarsList.find(a => a.id === avatarId);
+    if (targetAvatar?.isDefault) return;
+
+    const updatedUnlocked = currentUnlocked.includes(avatarId)
+      ? currentUnlocked.filter(id => id !== avatarId)
+      : [...currentUnlocked, avatarId];
+
+    // Ažuriraj listu profila u adminu
+    const updatedProfiles = profiles.map(p =>
+      (p.id || p.name) === currentProfileKey ? { ...p, unlockedAvatars: updatedUnlocked } : p
+    );
+    setProfiles(updatedProfiles);
+    localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedProfiles));
+
+    // Ažuriraj aktivni profil igrača ako je to trenutno aktivni igrač
+    const activeRaw = localStorage.getItem('mlin_user_profile');
+    if (activeRaw) {
+      try {
+        const parsedActive = JSON.parse(activeRaw);
+        if (parsedActive.id === currentSelectedProfile.id || parsedActive.name === currentSelectedProfile.name) {
+          const updatedActive = { ...parsedActive, unlockedAvatars: updatedUnlocked };
+          localStorage.setItem('mlin_user_profile', JSON.stringify(updatedActive));
+        }
+      } catch (err) { }
+    }
+
+    window.dispatchEvent(new Event('storage'));
+
+    // Spremi na Firebase ako profil ima ID
+    if (currentSelectedProfile.id && db) {
+      try {
+        await updateDoc(doc(db, 'profiles', currentSelectedProfile.id), { unlockedAvatars: updatedUnlocked });
       } catch (err) { }
     }
   };
@@ -1268,6 +1382,253 @@ export default function AdminPanel() {
 
                 <button type="submit" style={{ ...S.btn('#10b981'), padding: '10px 22px', fontSize: '0.95rem' }}>
                   + Dodaj postignuće u katalog
+                </button>
+              </form>
+            </div>
+          )}
+
+{/* ==================================================================== */}
+          {/* EKRAN: UPRAVLJANJE I DODJELA AVATARA (M:N)                            */}
+          {/* ==================================================================== */}
+          {activeAdminTab === 'avatar_assign' && (
+            <div style={S.card}>
+              <div style={{ ...S.subCard, marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🦁 Katalog Avatara i Dodjela Igračima (M:N)</h2>
+                    <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: '4px' }}>
+                      Katalog: <strong style={{ color: '#38bdf8' }}>{avatarsList.length}</strong> avatara u bazi (Prvih 10 su početni/default)
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', border: '1px solid #334155' }}>
+                    <span style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 'bold' }}>👤 Odaberi profil:</span>
+                    <select
+                      value={selectedProfileId}
+                      onChange={(e) => setSelectedProfileId(e.target.value)}
+                      style={{ background: '#1e293b', color: '#fbbf24', border: '1px solid #475569', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      {profiles.map(p => {
+                        const val = p.id || p.name;
+                        return <option key={val} value={val}>{p.name || 'Neimenovani igrač'}</option>;
+                      })}
+                    </select>
+
+                    {currentSelectedProfile && (
+                      <span style={{ color: '#4ade80', fontSize: '0.82rem', fontWeight: 'bold', marginLeft: '6px' }}>
+                        Otključano: {(currentSelectedProfile.unlockedAvatars || []).length} / {avatarsList.length}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* PRETRAGA I FILTERI ZA AVATARE */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '10px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Pretraži avatar po nazivu..."
+                  value={avatarSearch}
+                  onChange={(e) => setAvatarSearch(e.target.value)}
+                  style={{ ...S.input, flex: 1, minWidth: '220px', backgroundColor: '#1e293b' }}
+                />
+
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'ALL', label: 'Svi' },
+                    { id: 'DEFAULT', label: 'Početni (Default)' },
+                    { id: 'LOCKED', label: 'Zaključani / Osvojivi' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setAvatarFilter(f.id)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid #334155',
+                        background: avatarFilter === f.id ? '#3b82f6' : '#1e293b',
+                        color: avatarFilter === f.id ? '#fff' : '#94a3b8',
+                        cursor: 'pointer',
+                        fontWeight: avatarFilter === f.id ? 'bold' : 'normal'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* MREŽA AVATARA */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '12px', maxHeight: '62vh', overflowY: 'auto', paddingRight: '6px' }}>
+                {avatarsList
+                  .filter(av => {
+                    const matchesSearch = av.name?.toLowerCase().includes(avatarSearch.toLowerCase()) || av.icon?.includes(avatarSearch);
+                    if (avatarFilter === 'DEFAULT') return matchesSearch && av.isDefault;
+                    if (avatarFilter === 'LOCKED') return matchesSearch && !av.isDefault;
+                    return matchesSearch;
+                  })
+                  .map(av => {
+                    const userUnlocked = Array.isArray(currentSelectedProfile?.unlockedAvatars) ? currentSelectedProfile.unlockedAvatars : [];
+                    const isUnlocked = av.isDefault || userUnlocked.includes(av.id);
+
+                    return (
+                      <div
+                        key={av.id}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px',
+                          backgroundColor: '#1e293b',
+                          borderRadius: '10px',
+                          border: isUnlocked ? '1px solid #22c55e' : '1px solid #334155',
+                          gap: '8px',
+                          textAlign: 'center',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        <div style={{ fontSize: '2rem' }}>{av.icon}</div>
+                        <div style={{ width: '100%', minWidth: 0 }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={av.name}>
+                            {av.name}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px' }}>
+                            {av.isDefault ? '🟢 Početni (Svima)' : (av.unlockHint || `ID: ${av.id}`)}
+                          </div>
+                        </div>
+
+                        {!av.isDefault ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAvatarForUser(av.id)}
+                            style={{
+                              width: '100%',
+                              padding: '6px',
+                              backgroundColor: isUnlocked ? '#ef4444' : '#22c55e',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '0.75rem',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {isUnlocked ? '✖ Oduzmi' : '✔ Dodijeli'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '0.7rem', color: '#38bdf8', fontStyle: 'italic', padding: '6px' }}>
+                            Uvijek otključano
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+{/* ==================================================================== */}
+          {/* EKRAN: STVORI NOVI AVATAR                                            */}
+          {/* ==================================================================== */}
+          {activeAdminTab === 'avatar_create' && (
+            <div style={S.card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h2 style={{ color: '#fbbf24', margin: 0 }}>✨ Stvori novi avatar</h2>
+                  <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+                    Novi avatar ulazi u globalni katalog od 80+ avatara, sprema se u bazu i može se automatski otključavati kroz igru!
+                  </p>
+                </div>
+                <button type="button" onClick={() => setActiveAdminTab('avatar_assign')} style={S.btn('#334155', '#cbd5e1')}>
+                  🎭 Idi na katalog avatara ({avatarsList.length})
+                </button>
+              </div>
+
+<form onSubmit={handleAddNewAvatar} style={S.subCard}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+                  
+                  {/* JEDNOSTAVAN I UNIVERZALAN UNOS IKONE */}
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={S.label}>Emoji / Ikona (klikni i pritisni Win + . ili koristi tipkovnicu mobitela)</label>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        required
+                        maxLength={4}
+                        value={newAvatarData.icon}
+                        onChange={(e) => setNewAvatarData({ ...newAvatarData, icon: e.target.value })}
+                        style={{
+                          ...S.input,
+                          width: '90px',
+                          textAlign: 'center',
+                          fontSize: '2rem',
+                          padding: '6px',
+                          backgroundColor: '#0f172a'
+                        }}
+                        title="Klikni ovdje pa pritisni Win + . (PC) ili otvori tipkovnicu (Mobitel)"
+                      />
+                      <div>
+                        <div style={{ fontSize: '0.85rem', color: '#e2e8f0', fontWeight: 'bold' }}>
+                          Trenutni odabir: <span style={{ fontSize: '1.6rem', marginLeft: '6px' }}>{newAvatarData.icon}</span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
+                          💡 <strong>PC:</strong> Klikni u polje i stisni <code style={{ background: '#334155', padding: '2px 5px', borderRadius: '4px', color: '#fbbf24' }}>Win + .</code><br />
+                          📱 <strong>Mobitel/Tablet:</strong> Tapni polje i koristi emoji tipkovnicu svog uređaja.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={S.label}>Naziv avatara</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="npr. Zlatni Vitez..."
+                      value={newAvatarData.name}
+                      onChange={(e) => setNewAvatarData({ ...newAvatarData, name: e.target.value })}
+                      style={S.input}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label style={S.label}>Uvjet pobjeda (Wins)</label>
+                    <input
+                      type="number"
+                      placeholder="npr. 10"
+                      value={newAvatarData.reqWins}
+                      onChange={(e) => setNewAvatarData({ ...newAvatarData, reqWins: e.target.value })}
+                      style={S.input}
+                    />
+                  </div>
+                  <div>
+                    <label style={S.label}>Uvjet bodova (Points)</label>
+                    <input
+                      type="number"
+                      placeholder="npr. 500"
+                      value={newAvatarData.reqPoints}
+                      onChange={(e) => setNewAvatarData({ ...newAvatarData, reqPoints: e.target.value })}
+                      style={S.input}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '18px' }}>
+                  <label style={S.label}>Tekst opisa otključavanja (Unlock Hint)</label>
+                  <input
+                    type="text"
+                    placeholder="npr. Ostvari 10 pobjeda ili skupi 500 bodova..."
+                    value={newAvatarData.unlockHint}
+                    onChange={(e) => setNewAvatarData({ ...newAvatarData, unlockHint: e.target.value })}
+                    style={S.input}
+                  />
+                </div>
+
+                <button type="submit" style={{ ...S.btn('#10b981'), padding: '10px 22px', fontSize: '0.95rem' }}>
+                  + Dodaj novi avatar u katalog
                 </button>
               </form>
             </div>

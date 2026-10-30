@@ -11,11 +11,7 @@ import { doc, onSnapshot, updateDoc, collection, getDocs } from 'firebase/firest
 import { db } from './firebase';
 import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
-
-const DEFAULT_AVATARS = [
-  '🦁', '🦅', '🐺', '🐉', '👑', '⚔️', '🛡️', '🧙‍♂️', '🥷', '🐻',
-  '🐯', '🦊', '🦈', '🤖', '👾', '🔥', '⚡', '💎', '🎯', '🚀'
-];
+import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -253,6 +249,7 @@ const playAudioEffect = (type, soundEnabled = true) => {
 
 // Pomoćna funkcija koja čita i spaja profil iz mlin_user_profile i mlin_admin_profiles
 const loadSyncedProfile = () => {
+  const defaultAvatars = getDefaultUnlockedAvatarIds();
   let userProf = {
     name: 'Igrač 1',
     avatar: '🦁',
@@ -261,7 +258,8 @@ const loadSyncedProfile = () => {
     wins: 0,
     losses: 0,
     matchHistory: [],
-    achievements: []
+    achievements: [],
+    unlockedAvatars: defaultAvatars
   };
 
   try {
@@ -271,7 +269,7 @@ const loadSyncedProfile = () => {
     }
   } catch (e) { }
 
-  // Provjeri postoji li taj igrač u mlin_admin_profiles i spoji njegova postignuća
+  // Provjeri postoji li taj igrač u mlin_admin_profiles i spoji njegova postignuća I otključane avatare (M:N)
   try {
     const savedAdminProfiles = localStorage.getItem('mlin_admin_profiles');
     if (savedAdminProfiles) {
@@ -285,21 +283,28 @@ const loadSyncedProfile = () => {
             ...(Array.isArray(userProf.achievements) ? userProf.achievements : []),
             ...(Array.isArray(match.achievements) ? match.achievements : [])
           ]));
+          const mergedAvatars = Array.from(new Set([
+            ...defaultAvatars,
+            ...(Array.isArray(userProf.unlockedAvatars) ? userProf.unlockedAvatars : []),
+            ...(Array.isArray(match.unlockedAvatars) ? match.unlockedAvatars : [])
+          ]));
           userProf = {
             ...userProf,
             id: userProf.id || match.id,
-            achievements: mergedAchs
+            achievements: mergedAchs,
+            unlockedAvatars: mergedAvatars
           };
         }
       }
     }
   } catch (e) { }
 
-  if (!Array.isArray(userProf.achievements)) {
-    userProf.achievements = [];
+  if (!Array.isArray(userProf.achievements)) userProf.achievements = [];
+  if (!Array.isArray(userProf.unlockedAvatars) || userProf.unlockedAvatars.length === 0) {
+    userProf.unlockedAvatars = defaultAvatars;
   }
 
-  return userProf;
+  return evaluateGameAvatars(userProf);
 };
 
 // Pomoćna funkcija koja skuplja SVA postignuća iz svih mogućih izvora u localStorageu + osnovni katalog
@@ -356,7 +361,15 @@ export default function App() {
   const [leaderboard, setLeaderboard] = useState([]);
 
   const [profile, setProfile] = useState(() => loadSyncedProfile());
-  const [achievementsCatalog, setAchievementsCatalog] = useState(() => loadFullAchievementsCatalog());
+  const [achievementsCatalog, setAchievementsCatalog] = useState(() => {
+    try {
+      return getStoredAchievements();
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const [avatarsCatalog, setAvatarsCatalog] = useState(() => getStoredAvatars());
   const [achievementFilter, setAchievementFilter] = useState('ALL');
 
   // Helper za ručnu promjenu profila iz UI-a (ime, bio, avatar) koji odmah sprema u localStorage
@@ -370,39 +383,41 @@ export default function App() {
     });
   };
 
-  // Sinkronizacija profila i kataloga postignuća (iz localStoragea + Firebasea)
+  // Osvježi katalog postignuća i avatara iz Admin panela i Firebasea
   useEffect(() => {
-    const syncAll = async () => {
+    const updateCatalogs = async () => {
       const freshProfile = loadSyncedProfile();
       setProfile(freshProfile);
 
-      // Učitaj iz localStoragea
-      const localCat = loadFullAchievementsCatalog();
-      setAchievementsCatalog(localCat);
+      const savedCustomAch = localStorage.getItem('mlin_admin_achievements');
+      if (savedCustomAch) {
+        try {
+          const parsed = JSON.parse(savedCustomAch);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAchievementsCatalog(parsed);
+          }
+        } catch (err) { }
+      }
 
-      // Povuci i s Firebasea ako su custom postignuća spremljena u kolekciju 'achievements'
+      setAvatarsCatalog(getStoredAvatars());
+
       if (db) {
         try {
-          const snap = await getDocs(collection(db, 'achievements'));
-          const fbList = [];
-          snap.forEach(d => fbList.push({ id: d.id, ...d.data() }));
-          if (fbList.length > 0) {
-            localStorage.setItem('mlin_admin_achievements', JSON.stringify(fbList));
-            setAchievementsCatalog(loadFullAchievementsCatalog(fbList));
+          const fbAvatars = await fetchAvatarsFromFirebase();
+          if (fbAvatars && fbAvatars.length > 0) {
+            setAvatarsCatalog(fbAvatars);
           }
         } catch (e) { }
       }
     };
 
-    syncAll();
-    window.addEventListener('storage', syncAll);
-    window.addEventListener('focus', syncAll);
+    if (currentScreen === 'PROFILE' || currentScreen === 'ACHIEVEMENTS') {
+      updateCatalogs();
+    }
 
-    return () => {
-      window.removeEventListener('storage', syncAll);
-      window.removeEventListener('focus', syncAll);
-    };
-  }, [currentScreen, location.pathname]);
+    window.addEventListener('storage', updateCatalogs);
+    return () => window.removeEventListener('storage', updateCatalogs);
+  }, [currentScreen]);
 
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -1252,20 +1267,52 @@ export default function App() {
               <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>
                 {t.uploadCustom}
               </button>
-              <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>{t.editAvatarTitle}:</p>
-              <div className="avatar-grid">
-                {DEFAULT_AVATARS.map((emoji, index) => (
-                  <div
-                    key={index}
-                    className="avatar-option"
-                    onClick={() => {
-                      updateProfileAndSave({ ...profile, avatar: emoji });
-                      setProfileTab('STATS');
-                    }}
-                  >
-                    {emoji}
-                  </div>
-                ))}
+              <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>
+                {t.editAvatarTitle} — Otključano: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
+              </p>
+              <div
+                className="avatar-grid"
+                style={{
+                  maxHeight: '240px',
+                  overflowY: 'auto',
+                  paddingRight: '6px'
+                }}
+              >
+                {getStoredAvatars().map((avItem) => {
+                  const unlockedIds = Array.isArray(profile.unlockedAvatars) ? profile.unlockedAvatars : [];
+                  const isUnlocked = avItem.isDefault || unlockedIds.includes(avItem.id);
+                  const isSelected = profile.avatar === avItem.icon;
+
+                  return (
+                    <div
+                      key={avItem.id}
+                      className="avatar-option"
+                      title={isUnlocked ? `${avItem.name} (Klikni za odabir)` : `🔒 ${avItem.name} — ${avItem.unlockHint || 'Zaključano'}`}
+                      style={{
+                        opacity: isUnlocked ? 1 : 0.35,
+                        filter: isUnlocked ? 'none' : 'grayscale(100%)',
+                        cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                        border: isSelected ? '2px solid #22c55e' : '1px solid #334155',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '6px 4px',
+                        minHeight: '64px'
+                      }}
+                      onClick={() => {
+                        if (!isUnlocked) return;
+                        updateProfileAndSave({ ...profile, avatar: avItem.icon });
+                        setProfileTab('STATS');
+                      }}
+                    >
+                      <span style={{ fontSize: '1.45rem' }}>{avItem.icon}</span>
+                      <span style={{ fontSize: '0.58rem', color: isUnlocked ? '#e2e8f0' : '#94a3b8', marginTop: '3px', textAlign: 'center', lineHeight: '1.1' }}>
+                        {isUnlocked ? avItem.name : `🔒 ${avItem.unlockHint || 'Zaključano'}`}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
