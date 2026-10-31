@@ -372,12 +372,24 @@ export default function App() {
   const [avatarsCatalog, setAvatarsCatalog] = useState(() => getStoredAvatars());
   const [achievementFilter, setAchievementFilter] = useState('ALL');
 
-  // Helper za ručnu promjenu profila iz UI-a (ime, bio, avatar) koji odmah sprema u localStorage
+  // Helper za ručnu promjenu profila iz UI-a (ime, bio, avatar) koji odmah sprema u localStorage i sinkronizira s Admin listom
   const updateProfileAndSave = (updater) => {
     setProfile(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       try {
         localStorage.setItem('mlin_user_profile', JSON.stringify(next));
+        const savedAdmin = localStorage.getItem('mlin_admin_profiles');
+        if (savedAdmin) {
+          const adminList = JSON.parse(savedAdmin);
+          if (Array.isArray(adminList)) {
+            const updatedAdmin = adminList.map(p =>
+              ((p.id && p.id === next.id) || (p.name && next.name && p.name.toLowerCase() === next.name.toLowerCase()))
+                ? { ...p, ...next }
+                : p
+            );
+            localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedAdmin));
+          }
+        }
       } catch (e) { }
       return next;
     });
@@ -436,6 +448,11 @@ export default function App() {
   const [coinResultText, setCoinResultText] = useState('');
   const [coinWinner, setCoinWinner] = useState(null);
   const [captured, setCaptured] = useState({ WHITE: 0, BLACK: 0 });
+
+  // Praćenje statistike meča i Post-Match Experience sažetka
+  const [millsCount, setMillsCount] = useState({ WHITE: 0, BLACK: 0 });
+  const [turnCount, setTurnCount] = useState(0);
+  const [matchSummary, setMatchSummary] = useState(null);
 
   const [players, setPlayers] = useState({
     WHITE: { name: '', id: 1 },
@@ -512,11 +529,7 @@ export default function App() {
         if (data.unplaced) setUnplaced(data.unplaced);
 
         if (data.winner && !winner) {
-          setWinner(data.winner);
-          const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
-          if (userColor) {
-            playAudioEffect(data.winner === userColor ? 'victory' : 'defeat', soundEnabled);
-          }
+          handleGameEnd(data.winner, true);
         }
 
         if (data.playerWhite && data.playerBlack) {
@@ -533,7 +546,7 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [onlineGameId]);
+  }, [onlineGameId, winner]);
 
   // Globalni slušač za pomicanje miša
   useEffect(() => {
@@ -688,6 +701,9 @@ export default function App() {
     setSelectedNode(null);
     setActiveHeldPiece(null);
     setWinner(null);
+    setMatchSummary(null);
+    setMillsCount({ WHITE: 0, BLACK: 0 });
+    setTurnCount(0);
     setP1Name(profile.name);
     setP2Name('Igrač 2');
     setSetupStep('NAMES');
@@ -706,6 +722,9 @@ export default function App() {
     setSelectedNode(null);
     setActiveHeldPiece(null);
     setWinner(null);
+    setMatchSummary(null);
+    setMillsCount({ WHITE: 0, BLACK: 0 });
+    setTurnCount(0);
     setP1Name(profile.name);
     setP2Name(`AI (${difficulty})`);
     setSetupStep('NAMES');
@@ -719,9 +738,9 @@ export default function App() {
       updateProfileAndSave(prev => ({
         ...prev,
         name: p1Data.name,
-        points: p1Data.rankPoints || 0,
-        wins: p1Data.wins || 0,
-        losses: p1Data.losses || 0
+        points: p1Data.rankPoints || prev.points || 0,
+        wins: p1Data.wins || prev.wins || 0,
+        losses: p1Data.losses || prev.losses || 0
       }));
     }
 
@@ -798,69 +817,180 @@ export default function App() {
 
   const getPiecesCount = (color) => board.filter(cell => cell === color).length;
 
-  const handleGameEnd = (winningColor) => {
-    setWinner(winningColor);
+// Evaluacija bodova, postignuća i avatara za pojedinog igrača
+  const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI) => {
+    const defaultAvs = getDefaultUnlockedAvatarIds();
+    const prevAchs = (Array.isArray(baseProf.achievements) ? baseProf.achievements : []).map(id => String(id).trim());
+    const prevAvs = Array.from(new Set([...defaultAvs, ...(Array.isArray(baseProf.unlockedAvatars) ? baseProf.unlockedAvatars : [])]));
 
-    if (onlineGameId) {
-      updateDoc(doc(db, "games", onlineGameId), {
-        winner: winningColor
-      });
-    }
-    const userColor = players.WHITE.name === profile.name ? 'WHITE' : (players.BLACK.name === profile.name ? 'BLACK' : null);
+    // 1. Osnovni bodovi (Pobjeda +12, Poraz -6) + Mlin bonus (max +4) + Dominantna pobjeda (6+ figura na ploči = +3)
+    const baseDelta = isWin ? 12 : -6;
+    const millBonus = Math.min(4, millsCount[playerColor] || 0);
+    const piecesLeftOnBoard = board.filter(c => c === playerColor).length;
+    const domBonus = (isWin && piecesLeftOnBoard >= 6) ? 3 : 0;
 
-    if (userColor) {
-      const isUserWinner = winningColor === userColor;
-      playAudioEffect(isUserWinner ? 'victory' : 'defeat', soundEnabled);
-    } else {
-      playAudioEffect('victory', soundEnabled);
-    }
-
-    if (!userColor) return;
-
-    const isUserWinner = winningColor === userColor;
-    const pointDelta = isUserWinner ? 12 : -6;
-    const newPoints = Math.max(0, profile.points + pointDelta);
+    const matchOnlyDelta = baseDelta + millBonus + domBonus;
+    const pointsAfterMatchRules = Math.max(0, (baseProf.points || 0) + matchOnlyDelta);
 
     const today = new Date();
     const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
-    const opponentName = isAIMode ? `AI (${aiDifficulty})` : (userColor === 'WHITE' ? players.BLACK.name : players.WHITE.name);
+
+    const updatedBase = {
+      ...baseProf,
+      points: pointsAfterMatchRules,
+      wins: isWin ? (baseProf.wins || 0) + 1 : (baseProf.wins || 0),
+      losses: !isWin ? (baseProf.losses || 0) + 1 : (baseProf.losses || 0),
+      achievements: prevAchs,
+      unlockedAvatars: prevAvs
+    };
+
+    // 2. Evaluiraj postignuća
+    const afterAchs = evaluateGameAchievements(updatedBase, {
+      isWin,
+      isAIMode: isVsAI,
+      aiDifficulty: isVsAI ? aiDifficulty : 'MEDIUM',
+      millsFormed: millsCount[playerColor] || (isWin ? 1 : 0),
+      wonByBlock: false,
+      lostByBlock: false,
+      piecesCaptured: captured[playerColor] || (isWin ? 7 : 0),
+      totalTurns: turnCount || 30
+    });
+
+    const fullAchCat = loadFullAchievementsCatalog(achievementsCatalog);
+    const newlyUnlockedAchIds = (afterAchs.achievements || []).map(id => String(id).trim()).filter(id => !prevAchs.includes(id));
+    const newAchObjects = newlyUnlockedAchIds.map(id => fullAchCat.find(a => String(a.id).trim() === id) || { id, title: `Postignuće (${id})`, icon: '🏅', points: 10 });
+
+    // 3. Zbroji extra bodove od svih novootključanih postignuća!
+    const achievementBonusPoints = newAchObjects.reduce((sum, ach) => sum + (Number(ach.points) || 10), 0);
+    const finalTotalPoints = pointsAfterMatchRules + achievementBonusPoints;
+
+    const totalPointChange = finalTotalPoints - (baseProf.points || 0);
+    const scoreString = totalPointChange >= 0 ? `+${totalPointChange}` : `${totalPointChange}`;
 
     const newMatch = {
-      player: profile.name,
-      vs: opponentName,
-      isWin: isUserWinner,
-      score: isUserWinner ? '+12' : '-6',
+      player: baseProf.name,
+      vs: vsName,
+      isWin,
+      score: scoreString,
       date: dateStr,
       category: gameCategory
     };
 
-    const baseUpdatedProfile = {
-      ...profile,
-      points: newPoints,
-      wins: isUserWinner ? (profile.wins || 0) + 1 : (profile.wins || 0),
-      losses: !isUserWinner ? (profile.losses || 0) + 1 : (profile.losses || 0),
-      matchHistory: [newMatch, ...(profile.matchHistory || []).slice(0, 9)]
+    const profWithAchPoints = {
+      ...afterAchs,
+      points: finalTotalPoints,
+      matchHistory: [newMatch, ...(baseProf.matchHistory || []).slice(0, 9)]
     };
 
-    const finalProfile = evaluateGameAchievements(baseUpdatedProfile, {
-      isWin: isUserWinner,
-      isAIMode: isAIMode,
-      aiDifficulty: typeof aiDifficulty !== 'undefined' ? aiDifficulty : (opponentName?.includes('Lako') ? 'EASY' : 'MEDIUM'),
-      millsFormed: typeof playerMillsCount !== 'undefined' ? playerMillsCount : (isUserWinner ? 1 : 0),
-      wonByBlock: typeof isOpponentTrapped !== 'undefined' ? isOpponentTrapped : false,
-      lostByBlock: typeof isPlayerTrapped !== 'undefined' ? isPlayerTrapped : false,
-      piecesCaptured: typeof enemyCapturedCount !== 'undefined' ? enemyCapturedCount : (isUserWinner ? 7 : 0),
-      totalTurns: typeof moveCount !== 'undefined' ? moveCount : 40
-    });
+    // 4. Evaluiraj avatare (sada kad su pribrojeni i bodovi od postignuća!)
+    const finalProf = evaluateGameAvatars(profWithAchPoints);
+    const fullAvCat = getStoredAvatars();
+    const newlyUnlockedAvIds = (finalProf.unlockedAvatars || []).filter(id => !prevAvs.includes(id));
+    const newAvObjects = newlyUnlockedAvIds.map(id => fullAvCat.find(a => a.id === id) || { id, name: `Avatar (${id})`, icon: '🎭' });
 
-    updateProfileAndSave(finalProfile);
-    saveMatchHistory(newMatch);
+    return {
+      updatedProfile: finalProf,
+      newMatch,
+      summary: {
+        name: finalProf.name,
+        avatar: finalProf.avatar || '🦁',
+        isWin,
+        baseDelta,
+        millBonus,
+        domBonus,
+        achievementBonusPoints,
+        totalPointChange,
+        finalPoints: finalProf.points || 0,
+        rankName: getRankName(finalProf.points || 0, lang),
+        newAchievements: newAchObjects,
+        newAvatars: newAvObjects,
+        mills: millsCount[playerColor] || 0,
+        captured: captured[playerColor] || 0
+      }
+    };
+  };
 
+  const handleGameEnd = (winningColor, fromSnapshot = false) => {
+    setWinner(winningColor);
+
+    if (onlineGameId && !fromSnapshot) {
+      updateDoc(doc(db, "games", onlineGameId), {
+        winner: winningColor
+      });
+    }
+
+    const p1ColorActual = players.WHITE.id === 1 ? 'WHITE' : 'BLACK';
+    const p2ColorActual = players.WHITE.id === 2 ? 'WHITE' : 'BLACK';
+
+    const isP1Winner = winningColor === p1ColorActual;
+    playAudioEffect(isP1Winner ? 'victory' : 'defeat', soundEnabled);
+
+    // 1. Izračunaj napredak i nagrade za Igrača 1 (Lijeva strana)
+    const p1BaseProfile = {
+      ...loadSyncedProfile(),
+      name: p1Name || profile.name
+    };
+    const p1Result = computePlayerExperience(p1BaseProfile, isP1Winner, p1ColorActual, p2Name, isAIMode);
+    updateProfileAndSave(p1Result.updatedProfile);
+    saveMatchHistory(p1Result.newMatch);
+
+    // 2. Izračunaj napredak i nagrade za Igrača 2 ako NIJE AI (Desna strana)
+    let p2SummaryData = null;
     if (!isAIMode) {
-      const winnerPlayer = isUserWinner ? profile.name : opponentName;
-      const loserPlayer = isUserWinner ? opponentName : profile.name;
+      let adminList = [];
+      try {
+        const rawAdmin = localStorage.getItem('mlin_admin_profiles');
+        if (rawAdmin) adminList = JSON.parse(rawAdmin);
+      } catch (e) { }
+
+      const existingP2 = Array.isArray(adminList)
+        ? adminList.find(p => p.name && p.name.toLowerCase() === p2Name.trim().toLowerCase())
+        : null;
+
+      const p2BaseProfile = existingP2 || {
+        id: 'player-' + Date.now(),
+        name: p2Name,
+        avatar: '🦊',
+        bio: 'Spreman za igru!',
+        country: 'HR',
+        points: 0,
+        wins: 0,
+        losses: 0,
+        matchHistory: [],
+        achievements: [],
+        unlockedAvatars: getDefaultUnlockedAvatarIds()
+      };
+
+      const isP2Winner = winningColor === p2ColorActual;
+      const p2Result = computePlayerExperience(p2BaseProfile, isP2Winner, p2ColorActual, p1Name, false);
+      p2SummaryData = p2Result.summary;
+
+      // Spremi ažuriranog Igrača 2 u mlin_admin_profiles kako bi mu ostali otključani avatari, bodovi i postignuća
+      try {
+        const rawAdminAfter = localStorage.getItem('mlin_admin_profiles');
+        let listAfter = rawAdminAfter ? JSON.parse(rawAdminAfter) : [];
+        const p2ExistsIdx = listAfter.findIndex(p => p.name && p.name.toLowerCase() === p2Name.trim().toLowerCase());
+        if (p2ExistsIdx >= 0) {
+          listAfter[p2ExistsIdx] = { ...listAfter[p2ExistsIdx], ...p2Result.updatedProfile };
+        } else {
+          listAfter.push(p2Result.updatedProfile);
+        }
+        localStorage.setItem('mlin_admin_profiles', JSON.stringify(listAfter));
+        window.dispatchEvent(new Event('storage'));
+      } catch (e) { }
+
+      const winnerPlayer = isP1Winner ? p1Name : p2Name;
+      const loserPlayer = isP1Winner ? p2Name : p1Name;
       updateMatchResults(winnerPlayer, loserPlayer, false, gameCategory);
     }
+
+    setMatchSummary({
+      isAIMode,
+      aiDifficulty,
+      winnerName: players[winningColor]?.name || (isP1Winner ? p1Name : p2Name),
+      leftPlayer: p1Result.summary,
+      rightPlayer: p2SummaryData
+    });
   };
 
   const handleCancelSelection = () => {
@@ -920,11 +1050,13 @@ export default function App() {
 
       const nextUnplaced = { ...unplaced, [turn]: unplaced[turn] - 1 };
       setUnplaced(nextUnplaced);
+      setTurnCount(prev => prev + 1);
 
       setActiveHeldPiece(null);
       setSelectedNode(null);
 
       if (checkFormsMill(newBoard, nodeIndex, turn)) {
+        setMillsCount(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
         setMustRemove(true);
         syncGameState(newBoard, turn, {
           mustRemove: true,
@@ -970,10 +1102,12 @@ export default function App() {
         newBoard[source] = null;
         newBoard[nodeIndex] = turn;
         setBoard(newBoard);
+        setTurnCount(prev => prev + 1);
         setSelectedNode(null);
         setActiveHeldPiece(null);
 
         if (checkFormsMill(newBoard, nodeIndex, turn)) {
+          setMillsCount(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
           setMustRemove(true);
           syncGameState(newBoard, turn, { mustRemove: true });
         } else {
@@ -1020,6 +1154,140 @@ export default function App() {
 
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
+
+// Pomoćna funkcija za iscrtavanje kartice napretka igrača (lijevo ili desno od vertikalne crte)
+  const renderPlayerExperienceColumn = (pData, sideLabel) => {
+    if (!pData) return null;
+    const isPositive = pData.totalPointChange >= 0;
+
+    return (
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '14px 16px',
+        backgroundColor: pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)',
+        borderRadius: '12px',
+        border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155',
+        minWidth: '260px'
+      }}>
+        {/* Kompaktno zaglavlje igrača (manji avatar + ime u istom redu) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#0f172a',
+              border: pData.isWin ? '2px solid #22c55e' : '2px solid #475569',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem',
+              flexShrink: 0
+            }}>
+              {renderAvatar(pData.avatar)}
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8' }}>{sideLabel}</div>
+              <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span>{pData.name}</span>
+                {pData.isWin && <span title="Pobjednik">👑</span>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px',
+            backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000'
+          }}>
+            {pData.isWin ? 'POBJEDA' : 'PORAZ'}
+          </div>
+        </div>
+
+        {/* Računica bodova i Rang */}
+        <div style={{
+          width: '100%', padding: '10px 12px', backgroundColor: '#0f172a',
+          borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 'bold' }}>Ukupno iz ovog meča:</span>
+            <span style={{
+              fontSize: '1.15rem', fontWeight: 'bold',
+              color: isPositive ? '#4ade80' : '#f87171'
+            }}>
+              {isPositive ? `+${pData.totalPointChange}` : pData.totalPointChange} B
+            </span>
+          </div>
+
+          {/* Detaljna razrada bodova (Meč + Mlinovi + Postignuća) */}
+          <div style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+            <span>Meč: <strong>{pData.baseDelta >= 0 ? `+${pData.baseDelta}` : pData.baseDelta} B</strong></span>
+            {pData.millBonus > 0 && <span>• Mlinovi: <strong style={{ color: '#38bdf8' }}>+{pData.millBonus} B</strong></span>}
+            {pData.domBonus > 0 && <span>• Dominacija: <strong style={{ color: '#f59e0b' }}>+{pData.domBonus} B</strong></span>}
+            {pData.achievementBonusPoints > 0 && <span>• Postignuća: <strong style={{ color: '#fbbf24' }}>+{pData.achievementBonusPoints} B</strong></span>}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: '#cbd5e1', paddingTop: '6px', borderTop: '1px solid #1e293b' }}>
+            <span>Stanje bodova: <strong>{pData.finalPoints} B</strong></span>
+            <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{pData.rankName}</span>
+          </div>
+        </div>
+
+        {/* Novootključana Postignuća (proširen prostor na 220px bez nepotrebnog skrolanja) */}
+        <div style={{ width: '100%', marginTop: '12px', textAlign: 'left' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fbbf24', marginBottom: '6px' }}>
+            🏅 Osvojena Postignuća ({pData.newAchievements.length})
+          </div>
+          {pData.newAchievements.length === 0 ? (
+            <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '6px 8px', backgroundColor: 'rgba(15, 23, 42, 0.4)', borderRadius: '6px' }}>
+              Nema novih postignuća u ovom meču.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
+              {pData.newAchievements.map(ach => (
+                <div key={ach.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px',
+                  backgroundColor: 'rgba(251, 191, 36, 0.12)', border: '1px solid #fbbf24', borderRadius: '8px'
+                }}>
+                  <span style={{ fontSize: '1.35rem' }}>{ach.icon || '🏅'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#f8fafc' }}>
+                      {ach.title || ach.name}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                      {ach.desc || ach.description}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fde047', whiteSpace: 'nowrap' }}>
+                    +{ach.points || 10} B
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Novootključani Avatari (proširen prostor) */}
+        <div style={{ width: '100%', marginTop: '10px', textAlign: 'left' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#38bdf8', marginBottom: '6px' }}>
+            🦁 Otključani Avatari ({pData.newAvatars.length})
+          </div>
+          {pData.newAvatars.length === 0 ? (
+            <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '6px 8px', backgroundColor: 'rgba(15, 23, 42, 0.4)', borderRadius: '6px' }}>
+              Nema novih avatara u ovom meču.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+              {pData.newAvatars.map(av => (
+                <div key={av.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)', border: '1px solid #38bdf8', borderRadius: '8px'
+                }}>
+                  <span style={{ fontSize: '1.3rem' }}>{av.icon}</span>
+                  <span style={{ fontSize: '0.76rem', fontWeight: 'bold', color: '#e0f2fe' }}>{av.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="game-container" onClick={() => {
@@ -1192,7 +1460,6 @@ export default function App() {
                 const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
                 const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
 
-                // Pronađi svako postignuće iz kataloga, a ako ga nekim slučajem nema u katalogu, prikaži fallback karticu da se uvijek vidi!
                 const unlockedList = userAchs.map(achId => {
                   const found = uniqueCatalog.find(a => String(a.id).trim() === achId);
                   if (found) return found;
@@ -1822,6 +2089,139 @@ export default function App() {
                   ))}
                 </div>
               </div>
+
+              {/* POST-MATCH EXPERIENCE MODAL (SAŽETAK NAGRADA S VERTIKALNOM CRTOM) */}
+              {winner && matchSummary && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(6, 11, 22, 0.88)',
+                    backdropFilter: 'blur(6px)',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 1200,
+                    padding: '16px'
+                  }}
+                >
+                  <div style={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    borderRadius: '18px',
+                    padding: '24px 28px',
+                    width: '100%',
+                    maxWidth: '820px',
+                    boxShadow: '0 24px 60px rgba(0,0,0,0.85)',
+                    color: '#f8fafc',
+                    textAlign: 'center',
+                    maxHeight: '92vh',
+                    overflowY: 'auto'
+                  }}>
+                    <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>
+                      ⚡ Sažetak Meča i Osvojenih Nagrada
+                    </div>
+                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>
+                      🏆 Pobjednik: <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span>
+                    </h2>
+
+                    {/* GLAVNI KONTEJNER: LIJEVI IGRAČ | VERTIKALNA CRTA | DESNI IGRAČ */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'stretch',
+                      justifyContent: 'center',
+                      gap: '20px',
+                      marginBottom: '22px',
+                      flexWrap: 'wrap'
+                    }}>
+                      {/* LIJEVA STRANA: IGRAČ 1 */}
+                      {renderPlayerExperienceColumn(matchSummary.leftPlayer, 'Igrač 1')}
+
+                      {/* VERTIKALNA CRTA RAZDJELNICA */}
+                      <div style={{
+                        width: '2px',
+                        background: 'linear-gradient(180deg, transparent 0%, #fbbf24 20%, #38bdf8 80%, transparent 100%)',
+                        borderRadius: '2px',
+                        alignSelf: 'stretch',
+                        minHeight: '280px',
+                        boxShadow: '0 0 12px rgba(251, 191, 36, 0.45)'
+                      }} />
+
+                      {/* DESNA STRANA: IGRAČ 2 ILI AI STATUS */}
+                      {!matchSummary.isAIMode && matchSummary.rightPlayer ? (
+                        renderPlayerExperienceColumn(matchSummary.rightPlayer, 'Igrač 2')
+                      ) : (
+                        <div style={{
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '20px',
+                          backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          borderRadius: '12px',
+                          border: '1px dashed #334155',
+                          minWidth: '240px',
+                          color: '#94a3b8'
+                        }}>
+                          <div style={{ fontSize: '3.2rem', marginBottom: '10px' }}>🤖</div>
+                          <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#e2e8f0' }}>
+                            Računalo ({matchSummary.aiDifficulty})
+                          </div>
+                          <p style={{ fontSize: '0.8rem', marginTop: '8px', maxWidth: '220px', lineHeight: '1.4' }}>
+                            AI protivnik ne skuplja bodove, rangove ni kolekciju avatara.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* AKCIJSKI GUMBI */}
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isAIMode) startAIGame(aiDifficulty);
+                          else startCouchGame();
+                        }}
+                        style={{
+                          backgroundColor: '#16a34a',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '10px 24px',
+                          borderRadius: '8px',
+                          fontSize: '0.95rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔄 Igraj ponovno
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWinner(null);
+                          setMatchSummary(null);
+                          setCurrentScreen('MAIN_MENU');
+                        }}
+                        style={{
+                          backgroundColor: '#2563eb',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '10px 24px',
+                          borderRadius: '8px',
+                          fontSize: '0.95rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🏠 Glavni izbornik
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </>
