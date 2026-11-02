@@ -7,7 +7,7 @@ import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { doc, onSnapshot, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
@@ -71,19 +71,7 @@ const TRANSLATIONS = {
     defaultTitle: "Početnik",
     win: "Pobjeda",
     loss: "Poraz",
-    ach1Title: "Prvi Mlin",
-    ach1Desc: "Složen prvi mlin u karijeri",
-    ach2Title: "Prva Pobjeda",
-    ach2Desc: "Pobijeđeno u prvoj partiji",
-    ach3Title: "Nepobjedivi",
-    ach3Desc: "Ostvareno 5 pobjeda u nizu",
     scoringTitle: "Sustav Bodovanja",
-    winPointsRule: "🏆 Pobjeda: +12 Bodova",
-    lossPointsRule: "❌ Poraz: -6 Bodova",
-    millBonusRule: "⚡ Mlin bonus: +1 Bod po mlinu (Max +4 po meču)",
-    domWinRule: "🔥 Dominantna pobjeda (6+ figura): +3 Boda",
-    streakRule: "🔥 Niz pobjeda (3+ pobjede u nizu): +3 Boda",
-    protectionRule: "🛡️ Zaštita: Bodovi ne mogu pasti ispod 0",
     rankingTitle: "Hijerarhija Rangova",
     ptsRequired: "bodova",
     aiDifficultyTitle: "Odaberite Težinu AI-ja",
@@ -138,19 +126,7 @@ const TRANSLATIONS = {
     defaultTitle: "Rookie",
     win: "Victory",
     loss: "Defeat",
-    ach1Title: "First Mill",
-    ach1Desc: "Formed the first mill of your career",
-    ach2Title: "First Victory",
-    ach2Desc: "Won your first game",
-    ach3Title: "Unstoppable",
-    ach3Desc: "Achieved a 5 win streak",
     scoringTitle: "Scoring Rules",
-    winPointsRule: "🏆 Victory: +12 Points",
-    lossPointsRule: "❌ Defeat: -6 Points",
-    millBonusRule: "⚡ Mill Bonus: +1 Point per mill (Max +4 per match)",
-    domWinRule: "🔥 Dominant Victory (6+ pieces remaining): +3 Points",
-    streakRule: "🔥 Win Streak (3+ wins): +3 Points",
-    protectionRule: "🛡️ Floor Protection: Points cannot drop below 0",
     rankingTitle: "Rank Hierarchy",
     ptsRequired: "points",
     aiDifficultyTitle: "Select AI Difficulty",
@@ -247,7 +223,6 @@ const playAudioEffect = (type, soundEnabled = true) => {
   } catch (e) { }
 };
 
-// Pomoćna funkcija koja čita i spaja profil iz mlin_user_profile i mlin_admin_profiles
 const loadSyncedProfile = () => {
   const defaultAvatars = getDefaultUnlockedAvatarIds();
   let userProf = {
@@ -269,7 +244,6 @@ const loadSyncedProfile = () => {
     }
   } catch (e) { }
 
-  // Provjeri postoji li taj igrač u mlin_admin_profiles i spoji njegova postignuća I otključane avatare (M:N)
   try {
     const savedAdminProfiles = localStorage.getItem('mlin_admin_profiles');
     if (savedAdminProfiles) {
@@ -307,7 +281,6 @@ const loadSyncedProfile = () => {
   return evaluateGameAvatars(userProf);
 };
 
-// Pomoćna funkcija koja skuplja SVA postignuća iz svih mogućih izvora u localStorageu + osnovni katalog
 const loadFullAchievementsCatalog = (extraList = []) => {
   let base = [];
   try {
@@ -359,7 +332,6 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const [leaderboard, setLeaderboard] = useState([]);
-
   const [profile, setProfile] = useState(() => loadSyncedProfile());
   const [achievementsCatalog, setAchievementsCatalog] = useState(() => {
     try {
@@ -372,7 +344,6 @@ export default function App() {
   const [avatarsCatalog, setAvatarsCatalog] = useState(() => getStoredAvatars());
   const [achievementFilter, setAchievementFilter] = useState('ALL');
 
-  // Helper za ručnu promjenu profila iz UI-a (ime, bio, avatar) koji odmah sprema u localStorage i sinkronizira s Admin listom
   const updateProfileAndSave = (updater) => {
     setProfile(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -395,7 +366,6 @@ export default function App() {
     });
   };
 
-  // Osvježi katalog postignuća i avatara iz Admin panela i Firebasea
   useEffect(() => {
     const updateCatalogs = async () => {
       const freshProfile = loadSyncedProfile();
@@ -434,7 +404,6 @@ export default function App() {
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // AI STANJA
   const [isAIMode, setIsAIMode] = useState(false);
   const [aiDifficulty, setAiDifficulty] = useState('EASY');
   const [aiColor, setAiColor] = useState('BLACK');
@@ -449,7 +418,6 @@ export default function App() {
   const [coinWinner, setCoinWinner] = useState(null);
   const [captured, setCaptured] = useState({ WHITE: 0, BLACK: 0 });
 
-  // Praćenje statistike meča i Post-Match Experience sažetka
   const [millsCount, setMillsCount] = useState({ WHITE: 0, BLACK: 0 });
   const [turnCount, setTurnCount] = useState(0);
   const [matchSummary, setMatchSummary] = useState(null);
@@ -475,7 +443,6 @@ export default function App() {
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
-  // Učitavanje pravila bodovanja (iz admin panela ili zadani niz)
   const DEFAULT_SCORING_RULES = [
     { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
     { id: 'rule-loss', icon: '❌', title: 'Poraz', value: '-6 Bodova' },
@@ -496,18 +463,14 @@ export default function App() {
       if (saved) {
         try {
           setActiveScoringRules(JSON.parse(saved));
-        } catch (e) {
-          console.error(e);
-        }
+        } catch (e) { }
       }
     };
-
     refreshRules();
     window.addEventListener('storage', refreshRules);
     return () => window.removeEventListener('storage', refreshRules);
   }, [currentScreen]);
 
-  // Ako smo u online meču, automatski gasi AI i odmah prebaci na PLAY ekran
   useEffect(() => {
     if (onlineGameId) {
       setIsAIMode(false);
@@ -516,10 +479,8 @@ export default function App() {
     }
   }, [onlineGameId]);
 
-  // Firestore sinkronizacija u stvarnom vremenu
   useEffect(() => {
     if (!onlineGameId) return;
-
     const unsubscribe = onSnapshot(doc(db, "games", onlineGameId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -527,11 +488,9 @@ export default function App() {
         if (data.currentTurn) setTurn(data.currentTurn);
         if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
         if (data.unplaced) setUnplaced(data.unplaced);
-
         if (data.winner && !winner) {
           handleGameEnd(data.winner, true);
         }
-
         if (data.playerWhite && data.playerBlack) {
           const whiteName = typeof data.playerWhite === 'object' ? (data.playerWhite.name || 'Bijeli') : data.playerWhite;
           const blackName = typeof data.playerBlack === 'object' ? (data.playerBlack.name || 'Crni') : data.playerBlack;
@@ -544,20 +503,12 @@ export default function App() {
         }
       }
     });
-
     return () => unsubscribe();
   }, [onlineGameId, winner]);
 
-  // Globalni slušač za pomicanje miša
   useEffect(() => {
-    const handleMouseMove = (e) => {
-      setMousePos({ x: e.clientX, y: e.clientY });
-    };
-
-    const handleGlobalMouseUp = () => {
-      isMouseDownRef.current = false;
-    };
-
+    const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
+    const handleGlobalMouseUp = () => { isMouseDownRef.current = false; };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => {
@@ -566,28 +517,20 @@ export default function App() {
     };
   }, []);
 
-  // AI POTEZ AUTOMATIKA
   useEffect(() => {
     if (!isAIMode || onlineGameId || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-
     if (turn === aiColor) {
       const timer = setTimeout(() => {
         if (mustRemove) {
           const targetNode = getAIPieceToRemove(board, turn === 'WHITE' ? 'BLACK' : 'WHITE', aiDifficulty);
-          if (targetNode !== null) {
-            executePlaceOrMove(targetNode);
-          }
+          if (targetNode !== null) executePlaceOrMove(targetNode);
           return;
         }
-
         if (unplaced[aiColor] > 0) {
           const targetNode = getAIPlacementNode(board, aiColor, aiDifficulty);
-          if (targetNode !== null) {
-            executePlaceOrMove(targetNode);
-          }
+          if (targetNode !== null) executePlaceOrMove(targetNode);
           return;
         }
-
         const move = getAIMove(board, aiColor, aiDifficulty);
         if (move) {
           executePlaceOrMove(move.to, move.from);
@@ -596,20 +539,16 @@ export default function App() {
           handleGameEnd(humanPlayer);
         }
       }, 500);
-
       return () => clearTimeout(timer);
     }
   }, [turn, mustRemove, board, unplaced, isAIMode, onlineGameId, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
 
-  // ŠAHOVSKI SAT
   useEffect(() => {
     if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         const currentTime = prev[turn];
         if (currentTime === null || currentTime === undefined) return prev;
-
         if (currentTime <= 1) {
           clearInterval(timer);
           const winningColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
@@ -619,11 +558,9 @@ export default function App() {
         return { ...prev, [turn]: currentTime - 1 };
       });
     }, 1000);
-
     return () => clearInterval(timer);
   }, [gameCategory, currentScreen, setupStep, winner, turn]);
 
-  // KONTROLA IGRE TIPKOVNICOM
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
@@ -641,17 +578,13 @@ export default function App() {
         setKeyboardFocusNode((prev) => getNextNodeByDirection(prev, direction));
       } else if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        if (keyboardFocusNode !== null) {
-          executePlaceOrMove(keyboardFocusNode);
-        }
+        if (keyboardFocusNode !== null) executePlaceOrMove(keyboardFocusNode);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentScreen, setupStep, winner, isAIMode, onlineGameId, myColor, turn, aiColor, keyboardFocusNode]);
 
-  // POMOĆNE METODE I LOGIKA
   const fetchLeaderboard = async () => {
     const data = await getLeaderboard();
     setLeaderboard(data);
@@ -682,7 +615,6 @@ export default function App() {
   const syncGameState = (nextBoard, nextTurn, extraUpdates = {}) => {
     setBoard(nextBoard);
     if (nextTurn) setTurn(nextTurn);
-
     if (onlineGameId) {
       updateDoc(doc(db, "games", onlineGameId), {
         board: nextBoard,
@@ -743,11 +675,9 @@ export default function App() {
         losses: p1Data.losses || prev.losses || 0
       }));
     }
-
     if (!isAIMode && p2Name) {
       await getOrCreateProfile(p2Name);
     }
-
     setSetupStep('COIN_TOSS');
   };
 
@@ -759,7 +689,6 @@ export default function App() {
     const isHeads = Math.random() < 0.5;
     const currentBaseSpins = Math.floor(coinRotation / 360) + 6;
     const finalDegree = isHeads ? currentBaseSpins * 360 : currentBaseSpins * 360 + 180;
-
     setCoinRotation(finalDegree);
 
     setTimeout(() => {
@@ -777,10 +706,8 @@ export default function App() {
           BLACK: { name: p1Name, id: 1 }
         });
         setAiColor('WHITE');
-
         const initialSecondsAI = gameCategory === 'COMPETITIVE' ? timeControl : null;
         setTimeLeft({ WHITE: initialSecondsAI, BLACK: initialSecondsAI });
-
         setTurn('WHITE');
         setSetupStep('PLAY');
       } else {
@@ -794,36 +721,25 @@ export default function App() {
     const p2Color = coinWinner === 2 ? color : (color === 'WHITE' ? 'BLACK' : 'WHITE');
 
     setPlayers({
-      WHITE: {
-        name: p1Color === 'WHITE' ? p1Name : p2Name,
-        id: p1Color === 'WHITE' ? 1 : 2
-      },
-      BLACK: {
-        name: p1Color === 'BLACK' ? p1Name : p2Name,
-        id: p1Color === 'BLACK' ? 1 : 2
-      }
+      WHITE: { name: p1Color === 'WHITE' ? p1Name : p2Name, id: p1Color === 'WHITE' ? 1 : 2 },
+      BLACK: { name: p1Color === 'BLACK' ? p1Name : p2Name, id: p1Color === 'BLACK' ? 1 : 2 }
     });
 
-    if (isAIMode) {
-      setAiColor(p2Color);
-    }
+    if (isAIMode) setAiColor(p2Color);
 
     const initialSeconds = gameCategory === 'COMPETITIVE' ? timeControl : null;
     setTimeLeft({ WHITE: initialSeconds, BLACK: initialSeconds });
-
     setTurn('WHITE');
     setSetupStep('PLAY');
   };
 
   const getPiecesCount = (color) => board.filter(cell => cell === color).length;
 
-// Evaluacija bodova, postignuća i avatara za pojedinog igrača
   const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI) => {
     const defaultAvs = getDefaultUnlockedAvatarIds();
     const prevAchs = (Array.isArray(baseProf.achievements) ? baseProf.achievements : []).map(id => String(id).trim());
     const prevAvs = Array.from(new Set([...defaultAvs, ...(Array.isArray(baseProf.unlockedAvatars) ? baseProf.unlockedAvatars : [])]));
 
-    // 1. Osnovni bodovi (Pobjeda +12, Poraz -6) + Mlin bonus (max +4) + Dominantna pobjeda (6+ figura na ploči = +3)
     const baseDelta = isWin ? 12 : -6;
     const millBonus = Math.min(4, millsCount[playerColor] || 0);
     const piecesLeftOnBoard = board.filter(c => c === playerColor).length;
@@ -844,7 +760,6 @@ export default function App() {
       unlockedAvatars: prevAvs
     };
 
-    // 2. Evaluiraj postignuća
     const afterAchs = evaluateGameAchievements(updatedBase, {
       isWin,
       isAIMode: isVsAI,
@@ -860,7 +775,6 @@ export default function App() {
     const newlyUnlockedAchIds = (afterAchs.achievements || []).map(id => String(id).trim()).filter(id => !prevAchs.includes(id));
     const newAchObjects = newlyUnlockedAchIds.map(id => fullAchCat.find(a => String(a.id).trim() === id) || { id, title: `Postignuće (${id})`, icon: '🏅', points: 10 });
 
-    // 3. Zbroji extra bodove od svih novootključanih postignuća!
     const achievementBonusPoints = newAchObjects.reduce((sum, ach) => sum + (Number(ach.points) || 10), 0);
     const finalTotalPoints = pointsAfterMatchRules + achievementBonusPoints;
 
@@ -882,7 +796,6 @@ export default function App() {
       matchHistory: [newMatch, ...(baseProf.matchHistory || []).slice(0, 9)]
     };
 
-    // 4. Evaluiraj avatare (sada kad su pribrojeni i bodovi od postignuća!)
     const finalProf = evaluateGameAvatars(profWithAchPoints);
     const fullAvCat = getStoredAvatars();
     const newlyUnlockedAvIds = (finalProf.unlockedAvatars || []).filter(id => !prevAvs.includes(id));
@@ -914,9 +827,7 @@ export default function App() {
     setWinner(winningColor);
 
     if (onlineGameId && !fromSnapshot) {
-      updateDoc(doc(db, "games", onlineGameId), {
-        winner: winningColor
-      });
+      updateDoc(doc(db, "games", onlineGameId), { winner: winningColor });
     }
 
     const p1ColorActual = players.WHITE.id === 1 ? 'WHITE' : 'BLACK';
@@ -925,16 +836,11 @@ export default function App() {
     const isP1Winner = winningColor === p1ColorActual;
     playAudioEffect(isP1Winner ? 'victory' : 'defeat', soundEnabled);
 
-    // 1. Izračunaj napredak i nagrade za Igrača 1 (Lijeva strana)
-    const p1BaseProfile = {
-      ...loadSyncedProfile(),
-      name: p1Name || profile.name
-    };
+    const p1BaseProfile = { ...loadSyncedProfile(), name: p1Name || profile.name };
     const p1Result = computePlayerExperience(p1BaseProfile, isP1Winner, p1ColorActual, p2Name, isAIMode);
     updateProfileAndSave(p1Result.updatedProfile);
     saveMatchHistory(p1Result.newMatch);
 
-    // 2. Izračunaj napredak i nagrade za Igrača 2 ako NIJE AI (Desna strana)
     let p2SummaryData = null;
     if (!isAIMode) {
       let adminList = [];
@@ -965,7 +871,6 @@ export default function App() {
       const p2Result = computePlayerExperience(p2BaseProfile, isP2Winner, p2ColorActual, p1Name, false);
       p2SummaryData = p2Result.summary;
 
-      // Spremi ažuriranog Igrača 2 u mlin_admin_profiles kako bi mu ostali otključani avatari, bodovi i postignuća
       try {
         const rawAdminAfter = localStorage.getItem('mlin_admin_profiles');
         let listAfter = rawAdminAfter ? JSON.parse(rawAdminAfter) : [];
@@ -979,9 +884,7 @@ export default function App() {
         window.dispatchEvent(new Event('storage'));
       } catch (e) { }
 
-      const winnerPlayer = isP1Winner ? p1Name : p2Name;
-      const loserPlayer = isP1Winner ? p2Name : p1Name;
-      updateMatchResults(winnerPlayer, loserPlayer, false, gameCategory);
+      updateMatchResults(isP1Winner ? p1Name : p2Name, isP1Winner ? p2Name : p1Name, false, gameCategory);
     }
 
     setMatchSummary({
@@ -1004,10 +907,8 @@ export default function App() {
 
     const opponent = turn === 'WHITE' ? 'BLACK' : 'WHITE';
 
-    // 1. FAZA UKLANJANJA FIGURA
     if (mustRemove) {
       if (board[nodeIndex] !== opponent) return;
-
       const opponentNodes = board.map((val, idx) => val === opponent ? idx : null).filter(val => val !== null);
       const allInMill = opponentNodes.every(idx => isPieceInMill(board, idx, opponent));
 
@@ -1026,7 +927,6 @@ export default function App() {
       setActiveHeldPiece(null);
 
       const isOpponentDefeated = unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3;
-
       if (isOpponentDefeated) {
         syncGameState(newBoard, turn, { mustRemove: false, winner: turn });
         handleGameEnd(turn);
@@ -1039,7 +939,6 @@ export default function App() {
       return;
     }
 
-    // 2. FAZA POSTAVLJANJA FIGURA IZ STALKA
     const isPlacingFromRack = activeHeldPiece && activeHeldPiece.type === 'RACK';
     if (unplaced[turn] > 0 || isPlacingFromRack) {
       if (board[nodeIndex] !== null) return;
@@ -1058,10 +957,7 @@ export default function App() {
       if (checkFormsMill(newBoard, nodeIndex, turn)) {
         setMillsCount(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
         setMustRemove(true);
-        syncGameState(newBoard, turn, {
-          mustRemove: true,
-          unplaced: nextUnplaced
-        });
+        syncGameState(newBoard, turn, { mustRemove: true, unplaced: nextUnplaced });
       } else {
         const isPlacementPhaseOver = nextUnplaced.WHITE === 0 && nextUnplaced.BLACK === 0;
         const oppCount = newBoard.filter(cell => cell === opponent).length;
@@ -1069,16 +965,11 @@ export default function App() {
           handleGameEnd(turn);
           return;
         }
-
-        syncGameState(newBoard, opponent, {
-          mustRemove: false,
-          unplaced: nextUnplaced
-        });
+        syncGameState(newBoard, opponent, { mustRemove: false, unplaced: nextUnplaced });
       }
       return;
     }
 
-    // 3. FAZA POMICANJA / LETENJA PO PLOČI
     const source = customSource !== null ? customSource : (activeHeldPiece?.sourceIdx ?? selectedNode);
     const isFlying = getPiecesCount(turn) === 3;
 
@@ -1112,7 +1003,6 @@ export default function App() {
           syncGameState(newBoard, turn, { mustRemove: true });
         } else {
           const oppCount = newBoard.filter(cell => cell === opponent).length;
-
           if (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3)) {
             handleGameEnd(turn);
             return;
@@ -1137,11 +1027,7 @@ export default function App() {
 
   const opponentNodes = board.map((val, idx) => val === opponentColor ? idx : null).filter(val => val !== null);
   const opponentNotInMill = opponentNodes.filter(idx => !isPieceInMill(board, idx, opponentColor));
-
-  const removableNodes = mustRemove
-    ? (opponentNotInMill.length > 0 ? opponentNotInMill : opponentNodes)
-    : [];
-
+  const removableNodes = mustRemove ? (opponentNotInMill.length > 0 ? opponentNotInMill : opponentNodes) : [];
   const currentActiveNode = activeHeldPiece?.sourceIdx ?? selectedNode;
   const validMoves = currentActiveNode !== null
     ? (getPiecesCount(turn) === 3
@@ -1151,34 +1037,185 @@ export default function App() {
 
   const p1Color = players.WHITE.id === 1 ? 'WHITE' : 'BLACK';
   const p2Color = players.WHITE.id === 2 ? 'WHITE' : 'BLACK';
-
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
 
-// Pomoćna funkcija za iscrtavanje kartice napretka igrača (lijevo ili desno od vertikalne crte)
+  // Funkcija za izvoz profila, statistike i povijesti u PDF
+  const handleExportProfilePDF = () => {
+    if (!profile) return;
+    const wins = Number(profile.wins) || 0;
+    const losses = Number(profile.losses) || 0;
+    const totalMatchCount = wins + losses;
+    const calcWinRate = totalMatchCount > 0 ? Math.round((wins / totalMatchCount) * 100) : 0;
+    const points = Number(profile.points) || 0;
+
+    const userAchIds = Array.isArray(profile.achievements) ? profile.achievements : [];
+    const fullAchCatalog = loadFullAchievementsCatalog(achievementsCatalog);
+    const unlockedAchievements = fullAchCatalog.filter(a => userAchIds.includes(String(a.id).trim()));
+    const history = Array.isArray(profile.matchHistory) ? profile.matchHistory : [];
+
+    const printWindow = window.open('', '_blank', 'width=900,height=800');
+    if (!printWindow) {
+      alert('Molimo dopustite skočne prozore (pop-ups) za izvoz PDF-a.');
+      return;
+    }
+
+    const dateStr = new Date().toLocaleDateString('hr-HR', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="hr">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Mlin_Profil_${profile.name || 'Igrac'}</title>
+        <style>
+          @page { size: A4; margin: 16mm; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; background: #fff; margin: 0; padding: 0; line-height: 1.45; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #2563eb; padding-bottom: 14px; margin-bottom: 22px; }
+          .profile-info { display: flex; align-items: center; gap: 16px; }
+          .avatar-box { font-size: 3rem; background: #f1f5f9; border: 2px solid #cbd5e1; border-radius: 12px; width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; }
+          .title-block h1 { margin: 0; font-size: 1.6rem; color: #0f172a; }
+          .title-block p { margin: 4px 0 0 0; color: #475569; font-size: 0.9rem; font-style: italic; }
+          .meta { text-align: right; font-size: 0.8rem; color: #64748b; }
+          h2 { font-size: 1.15rem; color: #1e3a8a; border-left: 4px solid #2563eb; padding-left: 10px; margin: 24px 0 12px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+          .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
+          .stat-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 8px; text-align: center; }
+          .stat-val { font-size: 1.35rem; font-weight: bold; color: #0f172a; }
+          .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 0.85rem; }
+          th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+          th { background-color: #f1f5f9; color: #1e293b; font-weight: 700; }
+          tr:nth-child(even) { background-color: #f8fafc; }
+          .badge-win { color: #15803d; font-weight: bold; }
+          .badge-loss { color: #b91c1c; font-weight: bold; }
+          .empty-msg { padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; color: #64748b; font-size: 0.85rem; text-align: center; }
+          .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 0.75rem; color: #94a3b8; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="profile-info">
+            <div class="avatar-box">${profile.avatar || '🦁'}</div>
+            <div class="title-block">
+              <h1>${profile.name || 'Igrač'} <span style="font-size:0.95rem; color:#2563eb;">(${getRankName(points, 'hr')})</span></h1>
+              <p>"${profile.bio || 'Spreman za igru!'}"</p>
+            </div>
+          </div>
+          <div class="meta">
+            <strong>SLUŽBENI IZVJEŠTAJ PROFILA</strong><br/>
+            Igra: Mlin (Nine Men's Morris)<br/>
+            Datum: ${dateStr}
+          </div>
+        </div>
+
+        <h2>📊 1. Ukupna Statistika Igrača</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-val" style="color:#2563eb;">${points}</div>
+            <div class="stat-label">Bodovi</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val">${totalMatchCount}</div>
+            <div class="stat-label">Ukupno Mečeva</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" style="color:#16a34a;">${wins}</div>
+            <div class="stat-label">Pobjede</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" style="color:#dc2626;">${losses}</div>
+            <div class="stat-label">Porazi</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val">${calcWinRate}%</div>
+            <div class="stat-label">Win Rate</div>
+          </div>
+        </div>
+
+        <h2>🏅 2. Osvojena Postignuća (${unlockedAchievements.length})</h2>
+        ${unlockedAchievements.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 45px; text-align:center;">Ikona</th>
+                <th>Naziv postignuća</th>
+                <th>Opis uvjeta</th>
+                <th style="width: 75px;">Bodovi</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${unlockedAchievements.map(a => `
+                <tr>
+                  <td style="text-align:center; font-size:1.2rem;">${a.icon || '🏅'}</td>
+                  <td><strong>${a.title || a.name}</strong></td>
+                  <td>${a.desc || a.description || '-'}</td>
+                  <td>+${a.points || 10} B</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : `<div class="empty-msg">Igrač još nema otključanih postignuća.</div>`}
+
+        <h2>⚔️ 3. Povijest Mečeva (${history.length})</h2>
+        ${history.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                <th>Protivnik</th>
+                <th>Ishod</th>
+                <th>Bodovi</th>
+                <th>Datum</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${history.map((m, idx) => `
+                <tr>
+                  <td>${idx + 1}.</td>
+                  <td><strong>${m.vs || 'Nepoznat'}</strong></td>
+                  <td class="${m.isWin ? 'badge-win' : 'badge-loss'}">${m.isWin ? 'POBJEDA' : 'PORAZ'}</td>
+                  <td>${m.score || '-'}</td>
+                  <td>${m.date || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : `<div class="empty-msg">Nema zabilježenih odigranih mečeva u povijesti.</div>`}
+
+        <div class="footer">
+          Dokument generiran iz aplikacije Mlin • Profil: ${profile.name || 'Igrač'}
+        </div>
+
+        <script>
+          window.onload = function() { setTimeout(window.print, 250); };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
 
     return (
       <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '14px 16px',
+        flex: 1, display: 'flex', flexDirection: 'column', padding: '14px 16px',
         backgroundColor: pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)',
-        borderRadius: '12px',
-        border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155',
-        minWidth: '260px'
+        borderRadius: '12px', border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155', minWidth: '260px'
       }}>
-        {/* Kompaktno zaglavlje igrača (manji avatar + ime u istom redu) */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#0f172a',
               border: pData.isWin ? '2px solid #22c55e' : '2px solid #475569',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem',
-              flexShrink: 0
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0
             }}>
               {renderAvatar(pData.avatar)}
             </div>
@@ -1190,45 +1227,30 @@ export default function App() {
               </div>
             </div>
           </div>
-
-          <div style={{
-            fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px',
-            backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000'
-          }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px', backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000' }}>
             {pData.isWin ? 'POBJEDA' : 'PORAZ'}
           </div>
         </div>
 
-        {/* Računica bodova i Rang */}
-        <div style={{
-          width: '100%', padding: '10px 12px', backgroundColor: '#0f172a',
-          borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box'
-        }}>
+        <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
             <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 'bold' }}>Ukupno iz ovog meča:</span>
-            <span style={{
-              fontSize: '1.15rem', fontWeight: 'bold',
-              color: isPositive ? '#4ade80' : '#f87171'
-            }}>
+            <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: isPositive ? '#4ade80' : '#f87171' }}>
               {isPositive ? `+${pData.totalPointChange}` : pData.totalPointChange} B
             </span>
           </div>
-
-          {/* Detaljna razrada bodova (Meč + Mlinovi + Postignuća) */}
           <div style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
             <span>Meč: <strong>{pData.baseDelta >= 0 ? `+${pData.baseDelta}` : pData.baseDelta} B</strong></span>
             {pData.millBonus > 0 && <span>• Mlinovi: <strong style={{ color: '#38bdf8' }}>+{pData.millBonus} B</strong></span>}
             {pData.domBonus > 0 && <span>• Dominacija: <strong style={{ color: '#f59e0b' }}>+{pData.domBonus} B</strong></span>}
             {pData.achievementBonusPoints > 0 && <span>• Postignuća: <strong style={{ color: '#fbbf24' }}>+{pData.achievementBonusPoints} B</strong></span>}
           </div>
-
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: '#cbd5e1', paddingTop: '6px', borderTop: '1px solid #1e293b' }}>
             <span>Stanje bodova: <strong>{pData.finalPoints} B</strong></span>
             <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{pData.rankName}</span>
           </div>
         </div>
 
-        {/* Novootključana Postignuća (proširen prostor na 220px bez nepotrebnog skrolanja) */}
         <div style={{ width: '100%', marginTop: '12px', textAlign: 'left' }}>
           <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fbbf24', marginBottom: '6px' }}>
             🏅 Osvojena Postignuća ({pData.newAchievements.length})
@@ -1240,29 +1262,19 @@ export default function App() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
               {pData.newAchievements.map(ach => (
-                <div key={ach.id} style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px',
-                  backgroundColor: 'rgba(251, 191, 36, 0.12)', border: '1px solid #fbbf24', borderRadius: '8px'
-                }}>
+                <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', backgroundColor: 'rgba(251, 191, 36, 0.12)', border: '1px solid #fbbf24', borderRadius: '8px' }}>
                   <span style={{ fontSize: '1.35rem' }}>{ach.icon || '🏅'}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#f8fafc' }}>
-                      {ach.title || ach.name}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
-                      {ach.desc || ach.description}
-                    </div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#f8fafc' }}>{ach.title || ach.name}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{ach.desc || ach.description}</div>
                   </div>
-                  <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fde047', whiteSpace: 'nowrap' }}>
-                    +{ach.points || 10} B
-                  </span>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fde047', whiteSpace: 'nowrap' }}>+{ach.points || 10} B</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Novootključani Avatari (proširen prostor) */}
         <div style={{ width: '100%', marginTop: '10px', textAlign: 'left' }}>
           <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#38bdf8', marginBottom: '6px' }}>
             🦁 Otključani Avatari ({pData.newAvatars.length})
@@ -1274,10 +1286,7 @@ export default function App() {
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
               {pData.newAvatars.map(av => (
-                <div key={av.id} style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px',
-                  backgroundColor: 'rgba(56, 189, 248, 0.15)', border: '1px solid #38bdf8', borderRadius: '8px'
-                }}>
+                <div key={av.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', backgroundColor: 'rgba(56, 189, 248, 0.15)', border: '1px solid #38bdf8', borderRadius: '8px' }}>
                   <span style={{ fontSize: '1.3rem' }}>{av.icon}</span>
                   <span style={{ fontSize: '0.76rem', fontWeight: 'bold', color: '#e0f2fe' }}>{av.name}</span>
                 </div>
@@ -1297,19 +1306,10 @@ export default function App() {
       }
     }}>
       {activeHeldPiece && !winner && (
-        <div
-          className={`floating-cursor-piece ${activeHeldPiece.color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
-          style={{ left: `${mousePos.x}px`, top: `${mousePos.y}px` }}
-        />
+        <div className={`floating-cursor-piece ${activeHeldPiece.color === 'WHITE' ? 'piece-white' : 'piece-black'}`} style={{ left: `${mousePos.x}px`, top: `${mousePos.y}px` }} />
       )}
 
-      <input
-        type="file"
-        accept="image/*"
-        ref={fileInputRef}
-        style={{ display: 'none' }}
-        onChange={handleImageUpload}
-      />
+      <input type="file" accept="image/*" ref={fileInputRef} style={{ display: 'none' }} onChange={handleImageUpload} />
 
       {/* 1. GLAVNI IZBORNIK */}
       {currentScreen === 'MAIN_MENU' && (
@@ -1326,15 +1326,8 @@ export default function App() {
               type="button"
               onClick={() => navigate('/admin')}
               style={{
-                backgroundColor: '#1e293b',
-                color: '#fbbf24',
-                border: '1px solid #d97706',
-                padding: '8px 20px',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                letterSpacing: '0.5px'
+                backgroundColor: '#1e293b', color: '#fbbf24', border: '1px solid #d97706',
+                padding: '8px 20px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer'
               }}
             >
               ⚙️ Admin Panel
@@ -1342,36 +1335,22 @@ export default function App() {
           </div>
           <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
-            <button
-              className="btn-menu"
-              onClick={() => {
-                setProfile(loadSyncedProfile());
-                setAchievementsCatalog(loadFullAchievementsCatalog());
-                setProfileTab('STATS');
-                setCurrentScreen('PROFILE');
-              }}
-            >
-              {t.profile}
-            </button>
-
+            <button className="btn-menu" onClick={() => {
+              setProfile(loadSyncedProfile());
+              setAchievementsCatalog(loadFullAchievementsCatalog());
+              setProfileTab('STATS');
+              setCurrentScreen('PROFILE');
+            }}>{t.profile}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
-
             <button className="btn-menu" disabled>{t.playOnline}</button>
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
-
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
-            <button
-              className="btn-menu"
-              onClick={() => {
-                setProfile(loadSyncedProfile());
-                setAchievementsCatalog(loadFullAchievementsCatalog());
-                setCurrentScreen('ACHIEVEMENTS');
-              }}
-            >
-              🏅 Postignuća
-            </button>
-
+            <button className="btn-menu" onClick={() => {
+              setProfile(loadSyncedProfile());
+              setAchievementsCatalog(loadFullAchievementsCatalog());
+              setCurrentScreen('ACHIEVEMENTS');
+            }}>🏅 Postignuća</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
             <button className="btn-menu" onClick={() => navigate('/admin')}>⁉️ Dodajem poslije</button>
           </div>
@@ -1402,12 +1381,9 @@ export default function App() {
 
             {isEditingName ? (
               <input
-                type="text"
-                value={profile.name}
-                maxLength={12}
+                type="text" value={profile.name} maxLength={12}
                 onChange={(e) => updateProfileAndSave({ ...profile, name: e.target.value })}
-                onBlur={() => setIsEditingName(false)}
-                autoFocus
+                onBlur={() => setIsEditingName(false)} autoFocus
                 style={{ textAlign: 'center', width: '70%', background: '#071524', color: '#fff', border: '1px solid #d4af37', borderRadius: '6px', padding: '4px' }}
               />
             ) : (
@@ -1419,10 +1395,7 @@ export default function App() {
             <span className="profile-title-tag">{t.defaultTitle}</span>
 
             <input
-              className="bio-input"
-              value={profile.bio}
-              maxLength={40}
-              placeholder="Upišite status poruku..."
+              className="bio-input" value={profile.bio} maxLength={40} placeholder="Upišite status poruku..."
               onChange={(e) => updateProfileAndSave({ ...profile, bio: e.target.value })}
             />
           </div>
@@ -1430,16 +1403,11 @@ export default function App() {
           {profileTab !== 'AVATAR_SELECT' && (
             <div className="profile-tabs">
               <button className={`tab-btn ${profileTab === 'STATS' ? 'active' : ''}`} onClick={() => setProfileTab('STATS')}>{t.tabStats}</button>
-              <button
-                className={`tab-btn ${profileTab === 'BADGES' ? 'active' : ''}`}
-                onClick={() => {
-                  setProfile(loadSyncedProfile());
-                  setAchievementsCatalog(loadFullAchievementsCatalog());
-                  setProfileTab('BADGES');
-                }}
-              >
-                {t.tabBadges}
-              </button>
+              <button className={`tab-btn ${profileTab === 'BADGES' ? 'active' : ''}`} onClick={() => {
+                setProfile(loadSyncedProfile());
+                setAchievementsCatalog(loadFullAchievementsCatalog());
+                setProfileTab('BADGES');
+              }}>{t.tabBadges}</button>
               <button className={`tab-btn ${profileTab === 'HISTORY' ? 'active' : ''}`} onClick={() => setProfileTab('HISTORY')}>{t.tabHistory}</button>
             </div>
           )}
@@ -1459,50 +1427,18 @@ export default function App() {
                 const liveProfile = loadSyncedProfile();
                 const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
                 const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
-
-                const unlockedList = userAchs.map(achId => {
-                  const found = uniqueCatalog.find(a => String(a.id).trim() === achId);
-                  if (found) return found;
-                  return {
-                    id: achId,
-                    title: `Postignuće (${achId})`,
-                    desc: 'Posebno dodijeljeno postignuće',
-                    icon: '🏅'
-                  };
-                });
+                const unlockedList = userAchs.map(achId => uniqueCatalog.find(a => String(a.id).trim() === achId) || { id: achId, title: `Postignuće (${achId})`, desc: 'Ostvareno', icon: '🏅' });
 
                 if (unlockedList.length === 0) {
-                  return (
-                    <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>
-                      Igrač još nema dodijeljenih postignuća.
-                    </div>
-                  );
+                  return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>Igrač još nema dodijeljenih postignuća.</div>;
                 }
 
                 return unlockedList.map((ach) => (
-                  <div
-                    key={ach.id}
-                    className="achievement-card"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      background: '#0f172a',
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      borderLeft: '4px solid #22c55e'
-                    }}
-                  >
-                    <div className="achievement-icon" style={{ fontSize: '1.4rem' }}>
-                      {ach.icon || '🏅'}
-                    </div>
+                  <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>
+                    <div style={{ fontSize: '1.4rem' }}>{ach.icon || '🏅'}</div>
                     <div style={{ flex: 1, textAlign: 'left' }}>
-                      <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>
-                        {ach.title || ach.name}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                        {ach.description || ach.desc}
-                      </div>
+                      <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>{ach.title || ach.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ach.description || ach.desc}</div>
                     </div>
                   </div>
                 ));
@@ -1513,16 +1449,12 @@ export default function App() {
           {profileTab === 'HISTORY' && (
             <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
               {(!profile.matchHistory || profile.matchHistory.length === 0) ? (
-                <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>
-                  Nema odigranih mečeva.
-                </div>
+                <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>Nema odigranih mečeva.</div>
               ) : (
                 profile.matchHistory.map((m, idx) => (
                   <div key={idx} className="history-item">
                     <span>vs <strong>{m.vs}</strong> ({m.date})</span>
-                    <span className={m.isWin ? 'win-text' : 'loss-text'}>
-                      {m.isWin ? t.win : t.loss} ({m.score})
-                    </span>
+                    <span className={m.isWin ? 'win-text' : 'loss-text'}>{m.isWin ? t.win : t.loss} ({m.score})</span>
                   </div>
                 ))
               )}
@@ -1531,20 +1463,11 @@ export default function App() {
 
           {profileTab === 'AVATAR_SELECT' && (
             <div>
-              <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>
-                {t.uploadCustom}
-              </button>
+              <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>{t.uploadCustom}</button>
               <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>
                 {t.editAvatarTitle} — Otključano: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
               </p>
-              <div
-                className="avatar-grid"
-                style={{
-                  maxHeight: '240px',
-                  overflowY: 'auto',
-                  paddingRight: '6px'
-                }}
-              >
+              <div className="avatar-grid" style={{ maxHeight: '240px', overflowY: 'auto', paddingRight: '6px' }}>
                 {getStoredAvatars().map((avItem) => {
                   const unlockedIds = Array.isArray(profile.unlockedAvatars) ? profile.unlockedAvatars : [];
                   const isUnlocked = avItem.isDefault || unlockedIds.includes(avItem.id);
@@ -1552,20 +1475,11 @@ export default function App() {
 
                   return (
                     <div
-                      key={avItem.id}
-                      className="avatar-option"
-                      title={isUnlocked ? `${avItem.name} (Klikni za odabir)` : `🔒 ${avItem.name} — ${avItem.unlockHint || 'Zaključano'}`}
+                      key={avItem.id} className="avatar-option"
+                      title={isUnlocked ? `${avItem.name}` : `🔒 ${avItem.name} — ${avItem.unlockHint || 'Zaključano'}`}
                       style={{
-                        opacity: isUnlocked ? 1 : 0.35,
-                        filter: isUnlocked ? 'none' : 'grayscale(100%)',
-                        cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                        border: isSelected ? '2px solid #22c55e' : '1px solid #334155',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '6px 4px',
-                        minHeight: '64px'
+                        opacity: isUnlocked ? 1 : 0.35, filter: isUnlocked ? 'none' : 'grayscale(100%)', cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                        border: isSelected ? '2px solid #22c55e' : '1px solid #334155', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 4px', minHeight: '64px'
                       }}
                       onClick={() => {
                         if (!isUnlocked) return;
@@ -1584,7 +1498,24 @@ export default function App() {
             </div>
           )}
 
-          <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
+          {/* DUGMIĆI NA DNU PROFILA: NATRAG I PDF IZVOZ */}
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'center' }}>
+            <button className="btn-menu btn-back" style={{ flex: 1, margin: 0 }} onClick={() => setCurrentScreen('MAIN_MENU')}>
+              {t.back}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportProfilePDF}
+              style={{
+                flex: 1, backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px',
+                padding: '10px 14px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+              }}
+              title="Ispis statistike, postignuća i povijesti mečeva u PDF"
+            >
+              📄 Izvezi u PDF
+            </button>
+          </div>
         </div>
       )}
 
@@ -1610,19 +1541,11 @@ export default function App() {
           <h2 className="menu-title">{t.leaderboard}</h2>
           <table className="leaderboard-table">
             <thead>
-              <tr>
-                <th>#</th>
-                <th>Igrač</th>
-                <th>Bodovi</th>
-              </tr>
+              <tr><th>#</th><th>Igrač</th><th>Bodovi</th></tr>
             </thead>
             <tbody>
               {leaderboard.length === 0 ? (
-                <tr>
-                  <td colSpan="3" style={{ textAlign: 'center', padding: '12px', color: '#94a3b8' }}>
-                    Učitavanje ljestvice...
-                  </td>
-                </tr>
+                <tr><td colSpan="3" style={{ textAlign: 'center', padding: '12px', color: '#94a3b8' }}>Učitavanje ljestvice...</td></tr>
               ) : (
                 leaderboard.map((entry, idx) => {
                   const isCurrent = entry.name === profile.name;
@@ -1641,7 +1564,7 @@ export default function App() {
         </div>
       )}
 
-      {/* BODOVANJE - DINAMIČKI PRIKAZ IZ ADMIN PANELA */}
+      {/* BODOVANJE */}
       {currentScreen === 'SCORING' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.scoringTitle}</h2>
@@ -1654,9 +1577,7 @@ export default function App() {
               </div>
             ))}
           </div>
-          <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>
-            {t.back}
-          </button>
+          <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
         </div>
       )}
 
@@ -1676,13 +1597,9 @@ export default function App() {
         </div>
       )}
 
-      {/* EKRAN: POSTIGNUĆA */}
+      {/* POSTIGNUĆA */}
       {currentScreen === 'ACHIEVEMENTS' && (
-        <div
-          className="menu-card"
-          onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
-        >
+        <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
           {(() => {
             const liveProfile = loadSyncedProfile();
             const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
@@ -1697,7 +1614,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Filteri */}
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
                   {[
                     { id: 'ALL', label: 'Sve' },
@@ -1705,17 +1621,11 @@ export default function App() {
                     { id: 'LOCKED', label: 'Zaključana' }
                   ].map(f => (
                     <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setAchievementFilter(f.id)}
+                      key={f.id} type="button" onClick={() => setAchievementFilter(f.id)}
                       style={{
                         background: achievementFilter === f.id ? '#3b82f6' : '#1e293b',
                         color: achievementFilter === f.id ? '#fff' : '#94a3b8',
-                        border: '1px solid #334155',
-                        borderRadius: '6px',
-                        padding: '4px 10px',
-                        fontSize: '0.75rem',
-                        cursor: 'pointer'
+                        border: '1px solid #334155', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer'
                       }}
                     >
                       {f.label}
@@ -1723,7 +1633,6 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* Popis kartica postignuća */}
                 <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                   {fullCat
                     .filter(ach => {
@@ -1738,57 +1647,26 @@ export default function App() {
                       const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
 
                       return (
-                        <div
-                          key={ach.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            padding: '10px 14px',
-                            borderRadius: '8px',
-                            background: isUnlocked ? tierInfo.bg : 'rgba(15, 23, 42, 0.6)',
-                            border: isUnlocked ? `1px solid ${tierInfo.border}` : '1px solid #334155',
-                            opacity: isUnlocked ? 1 : 0.45,
-                            filter: isUnlocked ? 'none' : 'grayscale(80%)',
-                            transition: 'all 0.2s ease'
-                          }}
-                        >
-                          <div style={{ fontSize: '1.8rem', minWidth: '40px', textAlign: 'center' }}>
-                            {ach.icon || '🏅'}
-                          </div>
-
+                        <div key={ach.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderRadius: '8px',
+                          background: isUnlocked ? tierInfo.bg : 'rgba(15, 23, 42, 0.6)',
+                          border: isUnlocked ? `1px solid ${tierInfo.border}` : '1px solid #334155',
+                          opacity: isUnlocked ? 1 : 0.45, filter: isUnlocked ? 'none' : 'grayscale(80%)'
+                        }}>
+                          <div style={{ fontSize: '1.8rem', minWidth: '40px', textAlign: 'center' }}>{ach.icon || '🏅'}</div>
                           <div style={{ flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>
-                                {ach.title || ach.name}
-                              </span>
-                              <span style={{
-                                fontSize: '0.65rem',
-                                textTransform: 'uppercase',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                background: tierInfo.border,
-                                color: '#000',
-                                fontWeight: 'bold'
-                              }}>
+                              <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>{ach.title || ach.name}</span>
+                              <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', padding: '2px 6px', borderRadius: '4px', background: tierInfo.border, color: '#000', fontWeight: 'bold' }}>
                                 {tierInfo.label}
                               </span>
                             </div>
-                            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>
-                              {ach.desc || ach.description}
-                            </div>
+                            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc || ach.description}</div>
                           </div>
-
                           <div style={{ textAlign: 'right', minWidth: '70px' }}>
-                            <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                              +{ach.points || 10} B
-                            </div>
+                            <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>+{ach.points || 10} B</div>
                             <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-                              {isUnlocked ? (
-                                <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span>
-                              ) : (
-                                <span style={{ color: '#64748b' }}>🔒 Zaključano</span>
-                              )}
+                              {isUnlocked ? <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span> : <span style={{ color: '#64748b' }}>🔒 Zaključano</span>}
                             </div>
                           </div>
                         </div>
@@ -1798,15 +1676,7 @@ export default function App() {
               </>
             );
           })()}
-
-          <button
-            type="button"
-            className="btn-menu btn-back"
-            onClick={() => setCurrentScreen('MAIN_MENU')}
-            style={{ marginTop: '14px' }}
-          >
-            {t?.back || 'Natrag'}
-          </button>
+          <button type="button" className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')} style={{ marginTop: '14px' }}>{t?.back || 'Natrag'}</button>
         </div>
       )}
 
@@ -1830,45 +1700,15 @@ export default function App() {
 
                     <div className="game-mode-selector">
                       <div className="mode-toggle-group">
-                        <button
-                          type="button"
-                          className={`mode-btn ${gameCategory === 'CASUAL' ? 'active' : ''}`}
-                          onClick={() => setGameCategory('CASUAL')}
-                        >
-                          ☕ Casual
-                        </button>
-                        <button
-                          type="button"
-                          className={`mode-btn ${gameCategory === 'COMPETITIVE' ? 'active' : ''}`}
-                          onClick={() => setGameCategory('COMPETITIVE')}
-                        >
-                          ⚡ Natjecateljski
-                        </button>
+                        <button type="button" className={`mode-btn ${gameCategory === 'CASUAL' ? 'active' : ''}`} onClick={() => setGameCategory('CASUAL')}>☕ Casual</button>
+                        <button type="button" className={`mode-btn ${gameCategory === 'COMPETITIVE' ? 'active' : ''}`} onClick={() => setGameCategory('COMPETITIVE')}>⚡ Natjecateljski</button>
                       </div>
 
                       {gameCategory === 'COMPETITIVE' && (
                         <div className="time-preset-group">
-                          <button
-                            type="button"
-                            className={`time-preset-btn ${timeControl === 300 ? 'selected' : ''}`}
-                            onClick={() => setTimeControl(300)}
-                          >
-                            5 min (Classic)
-                          </button>
-                          <button
-                            type="button"
-                            className={`time-preset-btn ${timeControl === 120 ? 'selected' : ''}`}
-                            onClick={() => setTimeControl(120)}
-                          >
-                            2 min (Rapid)
-                          </button>
-                          <button
-                            type="button"
-                            className={`time-preset-btn ${timeControl === 45 ? 'selected' : ''}`}
-                            onClick={() => setTimeControl(45)}
-                          >
-                            45s (Blitz)
-                          </button>
+                          <button type="button" className={`time-preset-btn ${timeControl === 300 ? 'selected' : ''}`} onClick={() => setTimeControl(300)}>5 min (Classic)</button>
+                          <button type="button" className={`time-preset-btn ${timeControl === 120 ? 'selected' : ''}`} onClick={() => setTimeControl(120)}>2 min (Rapid)</button>
+                          <button type="button" className={`time-preset-btn ${timeControl === 45 ? 'selected' : ''}`} onClick={() => setTimeControl(45)}>45s (Blitz)</button>
                         </div>
                       )}
                     </div>
@@ -1885,33 +1725,12 @@ export default function App() {
                     <div className="coin-stage">
                       <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
                         <div className="coin-face front">{t.heads}</div>
-                        <div
-                          className="coin-face back"
-                          style={{
-                            background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)',
-                            color: '#0f172a',
-                            border: '3px solid #e2e8f0',
-                            boxShadow: 'inset 0 0 10px rgba(0, 0, 0, 0.25)'
-                          }}
-                        >
-                          {t.tails}
-                        </div>
+                        <div className="coin-face back" style={{ background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)', color: '#0f172a', border: '3px solid #e2e8f0' }}>{t.tails}</div>
                       </div>
                     </div>
                     <div className="coin-choice-btns">
                       <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>
-                      <button
-                        className="btn-gold"
-                        disabled={isFlipping}
-                        onClick={() => triggerCoinFlip('tails')}
-                        style={{
-                          background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)',
-                          color: '#0f172a',
-                          border: '1px solid #cbd5e1'
-                        }}
-                      >
-                        {t.tails}
-                      </button>
+                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#0f172a' }}>{t.tails}</button>
                     </div>
                   </>
                 )}
@@ -1944,29 +1763,10 @@ export default function App() {
                     {mustRemove && <div className="status-alert">{t.alertRemove}</div>}
                     {gameCategory === 'COMPETITIVE' && (
                       <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0' }}>
-                        <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          background: turn === 'WHITE' ? '#1e293b' : '#0f172a',
-                          border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155',
-                          color: (timeLeft.WHITE !== null && timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff',
-                          fontWeight: 'bold',
-                          fontSize: '1.1rem',
-                          fontFamily: 'monospace'
-                        }}>
+                        <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{ padding: '6px 14px', borderRadius: '8px', background: turn === 'WHITE' ? '#1e293b' : '#0f172a', border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
                           ⚪ {players.WHITE.name}: {formatTime(timeLeft.WHITE)}
                         </div>
-
-                        <div className={`timer-badge ${turn === 'BLACK' ? 'timer-active' : ''}`} style={{
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          background: turn === 'BLACK' ? '#1e293b' : '#0f172a',
-                          border: turn === 'BLACK' ? '2px solid #eab308' : '1px solid #334155',
-                          color: (timeLeft.BLACK !== null && timeLeft.BLACK <= 10) ? '#ef4444' : '#ffffff',
-                          fontWeight: 'bold',
-                          fontSize: '1.1rem',
-                          fontFamily: 'monospace'
-                        }}>
+                        <div className={`timer-badge ${turn === 'BLACK' ? 'timer-active' : ''}`} style={{ padding: '6px 14px', borderRadius: '8px', background: turn === 'BLACK' ? '#1e293b' : '#0f172a', border: turn === 'BLACK' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.BLACK <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
                           ⚫ {players.BLACK.name}: {formatTime(timeLeft.BLACK)}
                         </div>
                       </div>
@@ -1979,24 +1779,18 @@ export default function App() {
               </div>
 
               <div className="main-play-area">
-                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 1 */}
                 <div className="captured-tray tray-left">
                   {Array.from({ length: p1CapturedCount }).map((_, i) => (
-                    <div
-                      key={`captured-by-p1-${i}`}
-                      className={`piece-slot piece-captured ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
-                    />
+                    <div key={`captured-by-p1-${i}`} className={`piece-slot piece-captured ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'}`} />
                   ))}
                 </div>
 
-                {/* LIJEVI STALAK: IGRAČ 1 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title">{p1Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p1Color];
                       const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color) && (!onlineGameId || turn === myColor);
-
                       return (
                         <div
                           key={`p1-slot-${i}`}
@@ -2015,37 +1809,20 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* PLOČA */}
                 <Board
-                  board={board}
-                  selectedNode={currentActiveNode}
-                  validMoves={validMoves}
-                  removableNodes={removableNodes}
-                  mustRemove={mustRemove}
-                  turn={turn}
-                  isAIMode={onlineGameId ? false : isAIMode}
-                  aiColor={aiColor}
-                  focusedNode={keyboardFocusNode}
+                  board={board} selectedNode={currentActiveNode} validMoves={validMoves} removableNodes={removableNodes} mustRemove={mustRemove}
+                  turn={turn} isAIMode={onlineGameId ? false : isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
                     if (onlineGameId && turn !== myColor) return;
-                    if (selectedNode === targetIdx) {
-                      handleCancelSelection();
-                      return;
-                    }
+                    if (selectedNode === targetIdx) { handleCancelSelection(); return; }
                     setKeyboardFocusNode(targetIdx);
                     executePlaceOrMove(targetIdx);
                   }}
                   onNodePick={(nodeIdx) => {
                     if (onlineGameId && turn !== myColor) return;
-                    if (mustRemove) {
-                      executePlaceOrMove(nodeIdx);
-                      return;
-                    }
-                    if (selectedNode === nodeIdx) {
-                      handleCancelSelection();
-                      return;
-                    }
+                    if (mustRemove) { executePlaceOrMove(nodeIdx); return; }
+                    if (selectedNode === nodeIdx) { handleCancelSelection(); return; }
                     playAudioEffect('pickup', soundEnabled);
                     setSelectedNode(nodeIdx);
                     setKeyboardFocusNode(nodeIdx);
@@ -2053,14 +1830,12 @@ export default function App() {
                   }}
                 />
 
-                {/* DESNI STALAK: IGRAČ 2 */}
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p2Color];
                       const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color) && (!onlineGameId || turn === myColor);
-
                       return (
                         <div
                           key={`p2-slot-${i}`}
@@ -2079,145 +1854,36 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* OSVOJENE FIGURE KOJE DRŽI IGRAČ 2 */}
                 <div className="captured-tray tray-right">
                   {Array.from({ length: p2CapturedCount }).map((_, i) => (
-                    <div
-                      key={`captured-by-p2-${i}`}
-                      className={`piece-slot piece-captured ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'}`}
-                    />
+                    <div key={`captured-by-p2-${i}`} className={`piece-slot piece-captured ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'}`} />
                   ))}
                 </div>
               </div>
 
-              {/* POST-MATCH EXPERIENCE MODAL (SAŽETAK NAGRADA S VERTIKALNOM CRTOM) */}
               {winner && matchSummary && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'fixed',
-                    inset: 0,
-                    backgroundColor: 'rgba(6, 11, 22, 0.88)',
-                    backdropFilter: 'blur(6px)',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 1200,
-                    padding: '16px'
-                  }}
-                >
-                  <div style={{
-                    backgroundColor: '#0f172a',
-                    border: '1px solid #334155',
-                    borderRadius: '18px',
-                    padding: '24px 28px',
-                    width: '100%',
-                    maxWidth: '820px',
-                    boxShadow: '0 24px 60px rgba(0,0,0,0.85)',
-                    color: '#f8fafc',
-                    textAlign: 'center',
-                    maxHeight: '92vh',
-                    overflowY: 'auto'
-                  }}>
-                    <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>
-                      ⚡ Sažetak Meča i Osvojenih Nagrada
-                    </div>
-                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>
-                      🏆 Pobjednik: <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span>
-                    </h2>
+                <div onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(6, 11, 22, 0.88)', backdropFilter: 'blur(6px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200, padding: '16px' }}>
+                  <div style={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '18px', padding: '24px 28px', width: '100%', maxWidth: '820px', boxShadow: '0 24px 60px rgba(0,0,0,0.85)', color: '#f8fafc', textAlign: 'center', maxHeight: '92vh', overflowY: 'auto' }}>
+                    <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>⚡ Sažetak Meča i Osvojenih Nagrada</div>
+                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>🏆 Pobjednik: <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span></h2>
 
-                    {/* GLAVNI KONTEJNER: LIJEVI IGRAČ | VERTIKALNA CRTA | DESNI IGRAČ */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'stretch',
-                      justifyContent: 'center',
-                      gap: '20px',
-                      marginBottom: '22px',
-                      flexWrap: 'wrap'
-                    }}>
-                      {/* LIJEVA STRANA: IGRAČ 1 */}
+                    <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: '20px', marginBottom: '22px', flexWrap: 'wrap' }}>
                       {renderPlayerExperienceColumn(matchSummary.leftPlayer, 'Igrač 1')}
-
-                      {/* VERTIKALNA CRTA RAZDJELNICA */}
-                      <div style={{
-                        width: '2px',
-                        background: 'linear-gradient(180deg, transparent 0%, #fbbf24 20%, #38bdf8 80%, transparent 100%)',
-                        borderRadius: '2px',
-                        alignSelf: 'stretch',
-                        minHeight: '280px',
-                        boxShadow: '0 0 12px rgba(251, 191, 36, 0.45)'
-                      }} />
-
-                      {/* DESNA STRANA: IGRAČ 2 ILI AI STATUS */}
+                      <div style={{ width: '2px', background: 'linear-gradient(180deg, transparent 0%, #fbbf24 20%, #38bdf8 80%, transparent 100%)', borderRadius: '2px', alignSelf: 'stretch', minHeight: '280px', boxShadow: '0 0 12px rgba(251, 191, 36, 0.45)' }} />
                       {!matchSummary.isAIMode && matchSummary.rightPlayer ? (
                         renderPlayerExperienceColumn(matchSummary.rightPlayer, 'Igrač 2')
                       ) : (
-                        <div style={{
-                          flex: 1,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '20px',
-                          backgroundColor: 'rgba(15, 23, 42, 0.5)',
-                          borderRadius: '12px',
-                          border: '1px dashed #334155',
-                          minWidth: '240px',
-                          color: '#94a3b8'
-                        }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', border: '1px dashed #334155', minWidth: '240px', color: '#94a3b8' }}>
                           <div style={{ fontSize: '3.2rem', marginBottom: '10px' }}>🤖</div>
-                          <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#e2e8f0' }}>
-                            Računalo ({matchSummary.aiDifficulty})
-                          </div>
-                          <p style={{ fontSize: '0.8rem', marginTop: '8px', maxWidth: '220px', lineHeight: '1.4' }}>
-                            AI protivnik ne skuplja bodove, rangove ni kolekciju avatara.
-                          </p>
+                          <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#e2e8f0' }}>Računalo ({matchSummary.aiDifficulty})</div>
+                          <p style={{ fontSize: '0.8rem', marginTop: '8px', maxWidth: '220px', lineHeight: '1.4' }}>AI protivnik ne skuplja bodove ni rangove.</p>
                         </div>
                       )}
                     </div>
 
-                    {/* AKCIJSKI GUMBI */}
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isAIMode) startAIGame(aiDifficulty);
-                          else startCouchGame();
-                        }}
-                        style={{
-                          backgroundColor: '#16a34a',
-                          color: '#fff',
-                          border: 'none',
-                          padding: '10px 24px',
-                          borderRadius: '8px',
-                          fontSize: '0.95rem',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🔄 Igraj ponovno
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setWinner(null);
-                          setMatchSummary(null);
-                          setCurrentScreen('MAIN_MENU');
-                        }}
-                        style={{
-                          backgroundColor: '#2563eb',
-                          color: '#fff',
-                          border: 'none',
-                          padding: '10px 24px',
-                          borderRadius: '8px',
-                          fontSize: '0.95rem',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🏠 Glavni izbornik
-                      </button>
+                      <button type="button" onClick={() => { if (isAIMode) startAIGame(aiDifficulty); else startCouchGame(); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🔄 Igraj ponovno</button>
+                      <button type="button" onClick={() => { setWinner(null); setMatchSummary(null); setCurrentScreen('MAIN_MENU'); }} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🏠 Glavni izbornik</button>
                     </div>
                   </div>
                 </div>
