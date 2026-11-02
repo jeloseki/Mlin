@@ -98,24 +98,46 @@ export const INITIAL_AVATARS = [
   { id: 'av_80', icon: '⚜️', name: 'Velemajstorski Ljiljan', isDefault: false, reqPoints: 3800, unlockHint: 'Skupi 3800 bodova (Velemajstor)' }
 ];
 
+// Pomoćna funkcija koja pouzdano prepoznaje je li avatar ručno stvoren u Admin panelu
+export const isCustomAvatarItem = (av) => {
+  if (!av || av.isDefault) return false;
+  if (av.isCustom === true) return true;
+  const idStr = String(av.id || '').trim();
+  if (idStr && !idStr.startsWith('av_')) return true;
+  if (idStr.startsWith('av_')) {
+    const num = parseInt(idStr.replace('av_', ''), 10);
+    return !isNaN(num) && num > 80;
+  }
+  return false;
+};
+
 // Dohvaća katalog avatara i spaja sve izvore (uvijek čuva svih 80 + nove iz Admin Panela)
 export const getStoredAvatars = () => {
   const map = new Map();
-  INITIAL_AVATARS.forEach(item => map.set(String(item.id).trim(), item));
+  INITIAL_AVATARS.forEach(item => {
+    map.set(String(item.id).trim(), { ...item, isCustom: false });
+  });
 
   try {
-    const saved = localStorage.getItem('mlin_admin_avatars');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(item => {
-          if (item && item.id) {
-            map.set(String(item.id).trim(), item);
-          }
-        });
+    // Provjeravamo sve ključeve kako ništa ne bi ostalo skriveno
+    ['mlin_admin_avatars', 'mlin_avatars_catalog', 'mlin_custom_avatars'].forEach(key => {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(item => {
+            if (item && item.id) {
+              const cleanId = String(item.id).trim();
+              const isCustom = isCustomAvatarItem(item);
+              map.set(cleanId, { ...item, id: cleanId, isCustom });
+            }
+          });
+        }
       }
-    }
-  } catch (e) { }
+    });
+  } catch (e) {
+    console.warn('Greška pri čitanju avatara iz localStoragea:', e);
+  }
 
   return Array.from(map.values());
 };
@@ -147,9 +169,10 @@ export const evaluateGameAvatars = (profileData) => {
       currentUnlocked.add(av.id);
       return;
     }
-    if (av.reqWins && wins >= av.reqWins) currentUnlocked.add(av.id);
-    if (av.reqMatches && totalMatches >= av.reqMatches) currentUnlocked.add(av.id);
-    if (av.reqPoints && points >= av.reqPoints) currentUnlocked.add(av.id);
+    // Otključaj samo ako je postavljen uvjet veći od 0 i igrač ga je ispunio
+    if (Number(av.reqWins) > 0 && wins >= Number(av.reqWins)) currentUnlocked.add(av.id);
+    if (Number(av.reqMatches) > 0 && totalMatches >= Number(av.reqMatches)) currentUnlocked.add(av.id);
+    if (Number(av.reqPoints) > 0 && points >= Number(av.reqPoints)) currentUnlocked.add(av.id);
   });
 
   return {
@@ -158,31 +181,65 @@ export const evaluateGameAvatars = (profileData) => {
   };
 };
 
-// Sprema katalog u localStorage
+// Sprema katalog u localStorage (usklađuje sve ključeve)
 export const saveAvatarsToStorage = (avatarsList) => {
   try {
-    localStorage.setItem('mlin_admin_avatars', JSON.stringify(avatarsList));
+    const normalized = avatarsList.map(av => ({
+      ...av,
+      isCustom: isCustomAvatarItem(av)
+    }));
+    const customOnly = normalized.filter(av => av.isCustom);
+
+    localStorage.setItem('mlin_admin_avatars', JSON.stringify(normalized));
+    localStorage.setItem('mlin_avatars_catalog', JSON.stringify(normalized));
+    localStorage.setItem('mlin_custom_avatars', JSON.stringify(customOnly));
     window.dispatchEvent(new Event('storage'));
-  } catch (e) { }
+  } catch (e) {
+    console.warn('Greška pri spremanju avatara u localStorage:', e);
+  }
 };
 
 // Firebase sinkronizacija - spremanje pojedinačnog avatara
 export const saveAvatarToFirebase = async (avatarItem) => {
   if (!db || !avatarItem?.id) return;
   try {
-    await setDoc(doc(db, 'avatars', String(avatarItem.id)), avatarItem, { merge: true });
+    const itemToSave = {
+      ...avatarItem,
+      isCustom: isCustomAvatarItem(avatarItem)
+    };
+    await setDoc(doc(db, 'avatars', String(itemToSave.id)), itemToSave, { merge: true });
   } catch (e) {
     console.warn('Greška pri spremanju avatara na Firebase:', e);
   }
 };
 
-// Firebase sinkronizacija - brisanje avatara
+// Firebase sinkronizacija - brisanje isključivo stvorenog avatara
 export const deleteAvatarFromFirebase = async (avatarId) => {
-  if (!db || !avatarId) return;
+  if (!avatarId) return;
+  const cleanId = String(avatarId).trim();
+
+  // Zaštita za prvih 80 baznih avatara
+  const num = parseInt(cleanId.replace('av_', ''), 10);
+  if (cleanId.startsWith('av_') && !isNaN(num) && num <= 80) {
+    console.warn('Zaštićeni bazni avatar se ne može obrisati:', cleanId);
+    return;
+  }
+
+  // Ukloni iz svih lokalnih ključeva
   try {
-    await deleteDoc(doc(db, 'avatars', String(avatarId)));
+    const remaining = getStoredAvatars().filter(a => String(a.id).trim() !== cleanId);
+    saveAvatarsToStorage(remaining);
   } catch (e) {
-    console.warn('Greška pri brisanju avatara s Firebasea:', e);
+    console.warn('Greška pri lokalnom brisanju avatara:', e);
+  }
+
+  // Ukloni s Firebasea
+  if (db) {
+    try {
+      await deleteDoc(doc(db, 'avatars', cleanId));
+    } catch (e) {
+      console.warn('Greška pri brisanju avatara s Firebasea:', e);
+    }
   }
 };
 
@@ -192,15 +249,25 @@ export const fetchAvatarsFromFirebase = async () => {
   try {
     const snap = await getDocs(collection(db, 'avatars'));
     const fbList = [];
-    snap.forEach(d => fbList.push({ id: d.id, ...d.data() }));
+    snap.forEach(d => {
+      const data = d.data();
+      const item = { id: d.id, ...data };
+      fbList.push({ ...item, isCustom: isCustomAvatarItem(item) });
+    });
+
     if (fbList.length > 0) {
       const mergedMap = new Map();
-      getStoredAvatars().forEach(a => mergedMap.set(a.id, a));
-      fbList.forEach(a => mergedMap.set(a.id, a));
+      // Prvo postavi baznih 80
+      INITIAL_AVATARS.forEach(a => mergedMap.set(String(a.id).trim(), { ...a, isCustom: false }));
+      // Zatim nadopiši one s Firebasea (uključujući stvorene)
+      fbList.forEach(a => mergedMap.set(String(a.id).trim(), a));
+
       const finalCatalog = Array.from(mergedMap.values());
       saveAvatarsToStorage(finalCatalog);
       return finalCatalog;
     }
-  } catch (e) { }
+  } catch (e) {
+    console.warn('Greška pri dohvatu avatara s Firebasea:', e);
+  }
   return getStoredAvatars();
 };
