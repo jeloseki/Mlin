@@ -53,7 +53,7 @@ const MENU_GROUPS = [
   },
   {
     id: 'achievements',
-    label: '🏅 Postignuća (1:N)',
+    label: '🏅 Postignuća',
     items: [
       { id: 'ach_assign', label: '🎖️ Katalog i dodjela' },
       { id: 'ach_create', label: '✨ Stvori postignuće' }
@@ -61,7 +61,7 @@ const MENU_GROUPS = [
   },
   {
     id: 'avatars',
-    label: '🦁 Avatari (M:N)',
+    label: '🦁 Avatari',
     items: [
       { id: 'avatar_assign', label: '🎭 Katalog i dodjela' },
       { id: 'avatar_create', label: '✨ Stvori avatar' }
@@ -214,7 +214,7 @@ export default function AdminPanel() {
     return () => window.removeEventListener('storage', syncProfiles);
   }, []);
 
-  // --- STANJA: POSTIGNUĆA (1:N) ---
+  // --- STANJA: POSTIGNUĆA ---
   const [achievementsList, setAchievementsList] = useState([]);
   const [achSearch, setAchSearch] = useState('');
   const [achTierFilter, setAchTierFilter] = useState('ALL');
@@ -344,7 +344,7 @@ export default function AdminPanel() {
     }
   };
 
-  // --- STANJA: AVATARI (M:N) ---
+  // --- STANJA: AVATARI ---
   const [avatarsList, setAvatarsList] = useState(() => getStoredAvatars());
   const [avatarFilter, setAvatarFilter] = useState('ALL'); // 'ALL', 'DEFAULT', 'LOCKED', 'CREATED'
   const [newAvatarData, setNewAvatarData] = useState({
@@ -1194,14 +1194,14 @@ export default function AdminPanel() {
           )}
 
           {/* ==================================================================== */}
-          {/* 3. EKRAN: KATALOG I DODJELA POSTIGNUĆA (1:N)                         */}
+          {/* 3. EKRAN: KATALOG I DODJELA POSTIGNUĆA                               */}
           {/* ==================================================================== */}
           {activeAdminTab === 'ach_assign' && (
             <div style={S.card}>
               <div style={{ ...S.subCard, marginBottom: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
-                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🏅 Katalog Postignuća i Dodjela Igračima (1:N)</h2>
+                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🏅 Katalog Postignuća i Dodjela Igračima</h2>
                     <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: '4px' }}>
                       Katalog: <strong style={{ color: '#38bdf8' }}>{achievementsList.length}</strong> postignuća u bazi
                     </div>
@@ -1486,14 +1486,14 @@ export default function AdminPanel() {
           )}
 
           {/* ==================================================================== */}
-          {/* EKRAN: UPRAVLJANJE I DODJELA AVATARA (M:N)                           */}
+          {/* EKRAN: UPRAVLJANJE I DODJELA AVATARA                                 */}
           {/* ==================================================================== */}
           {activeAdminTab === 'avatar_assign' && (
             <div style={S.card}>
               <div style={{ ...S.subCard, marginBottom: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
-                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🦁 Katalog Avatara i Dodjela Igračima (M:N)</h2>
+                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🦁 Katalog Avatara i Dodjela Igračima</h2>
                     <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: '4px' }}>
                       Katalog: <strong style={{ color: '#38bdf8' }}>{avatarsList.length}</strong> avatara u bazi (Prvih 10 su početni/default)
                     </div>

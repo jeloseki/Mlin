@@ -12,6 +12,7 @@ import { db } from './firebase';
 import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
+import { exportProfileToPDF } from './utils/pdfExport';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -456,6 +457,10 @@ export default function App() {
     const saved = localStorage.getItem('mlin_scoring_rules');
     return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
   });
+
+  const handleExportProfilePDF = () => {
+    exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog));
+  };
 
   useEffect(() => {
     const refreshRules = () => {
@@ -1040,9 +1045,6 @@ export default function App() {
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
 
-
-
-// Kraj igre i prikazivanje osvojenih postignuca i avatara
   const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
@@ -1341,7 +1343,6 @@ export default function App() {
             </div>
           )}
 
-          {/* DUGMIĆI NA DNU PROFILA: NATRAG I PDF IZVOZ */}
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'center' }}>
             <button className="btn-menu btn-back" style={{ flex: 1, margin: 0 }} onClick={() => setCurrentScreen('MAIN_MENU')}>
               {t.back}
@@ -1573,7 +1574,7 @@ export default function App() {
                     </div>
                     <div className="coin-choice-btns">
                       <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>
-                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#0f172a' }}>{t.tails}</button>
+                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#071524' }}>{t.tails}</button>
                     </div>
                   </>
                 )}
