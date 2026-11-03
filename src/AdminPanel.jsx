@@ -18,6 +18,7 @@ import {
 import { db } from './firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ALL_COUNTRIES, CountryFlag } from './countriesData';
+import { getStoredBoards, saveBoardsToStorage } from './boardsData';
 
 const DEFAULT_IVICA = {
   id: 'admin-ivica',
@@ -43,6 +44,13 @@ const DEFAULT_SCORING_RULES = [
 ];
 
 const MENU_GROUPS = [
+  {
+    id: 'boards',
+    label: '🎨 Teme Ploča',
+    items: [
+      { id: 'board_assign', label: '🖼️ Katalog i dodjela ploča' }
+    ]
+  },
   {
     id: 'profiles',
     label: '👥 Igrači i Profili',
@@ -142,7 +150,8 @@ export default function AdminPanel() {
     profiles: true,
     avatars: true,
     achievements: true,
-    system: true
+    system: true,
+    boards: true
   });
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
 
@@ -189,7 +198,6 @@ export default function AdminPanel() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Osiguraj da DEFAULT_IVICA uvijek postoji u listi
           const hasIvica = parsed.some(p => p.id === 'admin-ivica' || p.name.toLowerCase() === 'ivica');
           if (!hasIvica) {
             return [DEFAULT_IVICA, ...parsed];
@@ -211,6 +219,48 @@ export default function AdminPanel() {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedForDelete, setSelectedForDelete] = useState([]);
 
+  // --- STANJA: PLOČE ---
+  const [boardsList, setBoardsList] = useState(() => getStoredBoards());
+
+  const handleToggleBoardForUser = async (boardId) => {
+    if (!currentSelectedProfile) return;
+
+    try {
+      const currentProfileKey = currentSelectedProfile.id || currentSelectedProfile.name;
+      const currentUnlocked = Array.isArray(currentSelectedProfile.unlockedBoards)
+        ? currentSelectedProfile.unlockedBoards
+        : [];
+
+      const targetBoard = boardsList.find(b => b.id === boardId);
+      if (targetBoard?.price === 0 || targetBoard?.isDefault) return;
+
+      const updatedUnlocked = currentUnlocked.includes(boardId)
+        ? currentUnlocked.filter(id => id !== boardId)
+        : [...currentUnlocked, boardId];
+
+      const updatedProfilesList = profiles.map(p =>
+        (p.id || p.name) === currentProfileKey ? { ...p, unlockedBoards: updatedUnlocked } : p
+      );
+      setProfiles(updatedProfilesList);
+      localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedProfilesList));
+
+      const activeRaw = localStorage.getItem('mlin_user_profile');
+      if (activeRaw) {
+        try {
+          const parsedActive = JSON.parse(activeRaw);
+          if (parsedActive.id === currentSelectedProfile.id || parsedActive.name === currentSelectedProfile.name) {
+            const updatedActive = { ...parsedActive, unlockedBoards: updatedUnlocked };
+            localStorage.setItem('mlin_user_profile', JSON.stringify(updatedActive));
+          }
+        } catch (err) { }
+      }
+
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error('Greška pri dodjeli ploče:', e);
+    }
+  };
+
   // Sinkronizacija profila ako se promijene u localStorageu
   useEffect(() => {
     const syncProfiles = () => {
@@ -228,7 +278,6 @@ export default function AdminPanel() {
         }
       }
 
-      // GARANCIJA: Provjeri postoji li Ivica u listi, ako ne - ubaci ga na prvo mjesto!
       const hasIvica = currentList.some(p => p.id === 'admin-ivica' || (p.name && p.name.toLowerCase() === 'ivica'));
       const finalProfiles = hasIvica ? currentList : [DEFAULT_IVICA, ...currentList];
 
@@ -236,7 +285,7 @@ export default function AdminPanel() {
       localStorage.setItem('mlin_admin_profiles', JSON.stringify(finalProfiles));
     };
 
-    syncProfiles(); // Pokreni odmah pri učitavanju
+    syncProfiles();
 
     window.addEventListener('storage', syncProfiles);
     return () => window.removeEventListener('storage', syncProfiles);
@@ -272,7 +321,6 @@ export default function AdminPanel() {
 
   const currentSelectedProfile = profiles.find(p => (p.id || p.name) === selectedProfileId) || profiles[0] || null;
 
-  // Profil koji se trenutno uređuje u formi (ako smo u edit modu)
   const profileBeingEdited = editingId
     ? profiles.find(p => p.id === editingId)
     : currentSelectedProfile;
@@ -358,9 +406,7 @@ export default function AdminPanel() {
           const updatedActive = { ...parsedActive, achievements: updatedAchs };
           localStorage.setItem('mlin_user_profile', JSON.stringify(updatedActive));
         }
-      } catch (err) {
-        console.warn('Greška pri ažuriranju mlin_user_profile:', err);
-      }
+      } catch (err) { }
     }
 
     window.dispatchEvent(new Event('storage'));
@@ -374,7 +420,7 @@ export default function AdminPanel() {
 
   // --- STANJA: AVATARI ---
   const [avatarsList, setAvatarsList] = useState(() => getStoredAvatars());
-  const [avatarFilter, setAvatarFilter] = useState('ALL'); // 'ALL', 'DEFAULT', 'LOCKED', 'CREATED'
+  const [avatarFilter, setAvatarFilter] = useState('ALL');
   const [newAvatarData, setNewAvatarData] = useState({
     name: '',
     icon: '🦁',
@@ -398,7 +444,6 @@ export default function AdminPanel() {
     loadAvatars();
   }, []);
 
-  // --- KREIRANJE NOVOG AVATARA ---
   const handleAddNewAvatar = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!newAvatarData.name.trim() || !newAvatarData.icon.trim()) return;
@@ -439,7 +484,6 @@ export default function AdminPanel() {
     setActiveAdminTab('avatar_assign');
   };
 
-  // --- DODJELA / ODUZIMANJE AVATARA KORISNIKU ---
   const handleToggleAvatarForUser = async (avatarId) => {
     if (!currentSelectedProfile) return;
 
@@ -483,7 +527,6 @@ export default function AdminPanel() {
     }
   };
 
-  // --- BRISANJE STVORENIH AVATARA ---
   const handleDeleteCreatedAvatar = async (avatarId) => {
     const target = avatarsList.find(a => a.id === avatarId);
     if (!target || !isAvatarCreated(target)) {
@@ -509,7 +552,6 @@ export default function AdminPanel() {
         }
       }
 
-      // Ukloni obrisani avatar iz otključanih avatara svih profila
       const cleanedProfiles = profiles.map(p => ({
         ...p,
         unlockedAvatars: Array.isArray(p.unlockedAvatars)
@@ -526,7 +568,6 @@ export default function AdminPanel() {
     }
   };
 
-  // --- LOGIKA ZA PROFILE ---
   const filteredCountries = countrySearch.trim()
     ? ALL_COUNTRIES.filter(c =>
       c.code.toLowerCase().includes(countrySearch.trim().toLowerCase()) ||
@@ -564,7 +605,9 @@ export default function AdminPanel() {
       losses: freshPlayer.losses || 0,
       matchHistory: freshPlayer.matchHistory || [],
       achievements: Array.isArray(freshPlayer.achievements) ? freshPlayer.achievements : [],
-      unlockedAvatars: Array.isArray(freshPlayer.unlockedAvatars) ? freshPlayer.unlockedAvatars : []
+      unlockedAvatars: Array.isArray(freshPlayer.unlockedAvatars) ? freshPlayer.unlockedAvatars : [],
+      unlockedBoards: Array.isArray(freshPlayer.unlockedBoards) ? freshPlayer.unlockedBoards : ['classic-wood'],
+      activeBoard: freshPlayer.activeBoard || 'classic-wood'
     };
 
     localStorage.setItem('mlin_user_profile', JSON.stringify(activeProfile));
@@ -659,7 +702,9 @@ export default function AdminPanel() {
         losses: 0,
         matchHistory: [],
         achievements: [],
-        unlockedAvatars: []
+        unlockedAvatars: [],
+        unlockedBoards: ['classic-wood'],
+        activeBoard: 'classic-wood'
       };
       const updated = [...profiles, newProfile];
       setProfiles(updated);
@@ -687,7 +732,9 @@ export default function AdminPanel() {
         losses: 0,
         matchHistory: [],
         achievements: [],
-        unlockedAvatars: []
+        unlockedAvatars: [],
+        unlockedBoards: ['classic-wood'],
+        activeBoard: 'classic-wood'
       });
     }
   };
@@ -696,7 +743,6 @@ export default function AdminPanel() {
     if (!window.confirm('Jesi li siguran? Ovo će resetirati bodove, pobjede, poraze i postignuća za ostale igrače na 0 (Ivica admin ostaje netaknut)!')) return;
 
     const resetList = profiles.map(p => {
-      // ZAŠTITA: Ivica (admin-ivica) se ne resetira na nulu!
       if (p.id === 'admin-ivica' || p.name.toLowerCase() === 'ivica') {
         return p;
       }
@@ -743,13 +789,11 @@ export default function AdminPanel() {
       setIsDeleteMode(false);
       return;
     }
-    // ZAŠTITA: Sprječavamo brisanje Ivice bez obzira je li označen
     const cleanSelection = selectedForDelete.filter(id => id !== 'admin-ivica');
 
     if (window.confirm(`Želite li obrisati označene profile (${cleanSelection.length})?`)) {
       const updated = profiles.filter(p => !cleanSelection.includes(p.id));
 
-      // Osiguraj da Ivica nikad ne nestane iz liste
       const hasIvica = updated.some(p => p.id === 'admin-ivica');
       const finalProfiles = hasIvica ? updated : [DEFAULT_IVICA, ...updated];
 
@@ -1116,7 +1160,6 @@ export default function AdminPanel() {
                       {avatarsList
                         .filter(av => {
                           if (av.isDefault) return true;
-                          // Gledamo unlockedAvatars od profila koji se trenutno uređuje (ili odabranog profila)
                           const userUnlocked = Array.isArray(profileBeingEdited?.unlockedAvatars)
                             ? profileBeingEdited.unlockedAvatars
                             : [];
@@ -1203,6 +1246,33 @@ export default function AdminPanel() {
                       onChange={e => setBio(e.target.value)}
                       style={S.input}
                     />
+                  </div>
+
+                  {/* AKTIVNA PLOČA (DROPDOWN) */}
+                  <div>
+                    <label style={S.label}>Aktivna ploča:</label>
+                    <select
+                      value={profileBeingEdited?.activeBoard || 'classic-blue-gold'}
+                      onChange={e => {
+                        const newBoardId = e.target.value;
+                        setProfiles(profiles.map(p => p.id === profileBeingEdited.id ? { ...p, activeBoard: newBoardId } : p));
+                      }}
+                      style={S.input}
+                    >
+                      {boardsList
+                        .filter(board => {
+                          const userUnlocked = Array.isArray(profileBeingEdited?.unlockedBoards) ? profileBeingEdited.unlockedBoards : ['classic-blue-gold'];
+                          return board.price === 0 || board.isDefault || userUnlocked.includes(board.id);
+                        })
+                        .map(board => (
+                          <option key={board.id} value={board.id}>
+                            🎨 {board.name}
+                          </option>
+                        ))}
+                    </select>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '3px' }}>
+                      Prikazuju se samo ploče koje su ovom igraču otključane.
+                    </div>
                   </div>
 
                   {/* GUMBI */}
@@ -1334,18 +1404,8 @@ export default function AdminPanel() {
                             padding: '10px 14px',
                             borderRadius: '8px',
                             backgroundColor: isEditing ? '#1e293b' : (isAssigned ? 'rgba(34, 197, 94, 0.08)' : '#1e293b'),
-                            borderTopWidth: '1px',
-                            borderTopStyle: 'solid',
-                            borderTopColor: isEditing ? '#fbbf24' : outerBorder,
-                            borderRightWidth: '1px',
-                            borderRightStyle: 'solid',
-                            borderRightColor: isEditing ? '#fbbf24' : outerBorder,
-                            borderBottomWidth: '1px',
-                            borderBottomStyle: 'solid',
-                            borderBottomColor: isEditing ? '#fbbf24' : outerBorder,
-                            borderLeftWidth: '5px',
-                            borderLeftStyle: 'solid',
-                            borderLeftColor: tierData.border,
+                            border: `1px solid ${isEditing ? '#fbbf24' : outerBorder}`,
+                            borderLeft: `5px solid ${tierData.border}`,
                             gap: '10px'
                           }}
                         >
@@ -1529,7 +1589,7 @@ export default function AdminPanel() {
           )}
 
           {/* ==================================================================== */}
-          {/* EKRAN: UPRAVLJANJE I DODJELA AVATARA                                 */}
+          {/* 5. EKRAN: UPRAVLJANJE I DODJELA AVATARA                              */}
           {/* ==================================================================== */}
           {activeAdminTab === 'avatar_assign' && (
             <div style={S.card}>
@@ -1600,7 +1660,7 @@ export default function AdminPanel() {
                     if (avatarFilter === 'DEFAULT') return av.isDefault;
                     if (avatarFilter === 'LOCKED') return !av.isDefault && !created;
                     if (avatarFilter === 'CREATED') return created;
-                    return true; // 'ALL'
+                    return true;
                   })
                   .map(av => {
                     const created = isAvatarCreated(av);
@@ -1654,7 +1714,6 @@ export default function AdminPanel() {
                               {isUnlocked ? '✖ Oduzmi igraču' : '✔ Dodijeli igraču'}
                             </button>
 
-                            {/* GUMB ZA BRISANJE - PRIKAZUJE SE ISKLJUČIVO ZA STVORENE AVATARE */}
                             {created && (
                               <button
                                 type="button"
@@ -1688,7 +1747,7 @@ export default function AdminPanel() {
           )}
 
           {/* ==================================================================== */}
-          {/* EKRAN: STVORI NOVI AVATAR                                            */}
+          {/* 6. EKRAN: STVORI NOVI AVATAR                                         */}
           {/* ==================================================================== */}
           {activeAdminTab === 'avatar_create' && (
             <div style={S.card}>
@@ -1791,7 +1850,110 @@ export default function AdminPanel() {
           )}
 
           {/* ==================================================================== */}
-          {/* 5. EKRAN: UPRAVLJANJE SUSTAVOM BODOVANJA                             */}
+          {/* 7. EKRAN: UPRAVLJANJE PLOČAMA                                        */}
+          {/* ==================================================================== */}
+          {activeAdminTab === 'board_assign' && (
+            <div style={S.card}>
+              <div style={{ ...S.subCard, marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <h2 style={{ color: '#fbbf24', margin: 0, fontSize: '1.25rem' }}>🎨 Katalog Ploča i Dodjela Igračima</h2>
+                    <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: '4px' }}>
+                      Katalog: <strong style={{ color: '#38bdf8' }}>{boardsList.length}</strong> tema ploča u bazi
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', border: '1px solid #334155' }}>
+                    <span style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 'bold' }}>👤 Odaberi profil:</span>
+                    <select
+                      value={selectedProfileId}
+                      onChange={(e) => setSelectedProfileId(e.target.value)}
+                      style={{ background: '#1e293b', color: '#fbbf24', border: '1px solid #475569', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      {profiles.map(p => {
+                        const val = p.id || p.name;
+                        return <option key={val} value={val}>{p.name || 'Neimenovani igrač'}</option>;
+                      })}
+                    </select>
+
+                    {currentSelectedProfile && (
+                      <span style={{ color: '#4ade80', fontSize: '0.82rem', fontWeight: 'bold', marginLeft: '6px' }}>
+                        Otključano: {(currentSelectedProfile.unlockedBoards || []).length} / {boardsList.length}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px', maxHeight: '62vh', overflowY: 'auto', paddingRight: '6px' }}>
+                {boardsList.map(board => {
+                  const userUnlocked = Array.isArray(currentSelectedProfile?.unlockedBoards) ? currentSelectedProfile.unlockedBoards : [];
+                  const isUnlocked = board.price === 0 || board.isDefault || userUnlocked.includes(board.id);
+                  const isSelected = currentSelectedProfile?.activeBoard === board.id;
+
+                  return (
+                    <div
+                      key={board.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        padding: '14px',
+                        backgroundColor: '#1e293b',
+                        borderRadius: '10px',
+                        border: isSelected ? '2px solid #38bdf8' : (isUnlocked ? '1px solid #22c55e' : '1px solid #334155'),
+                        gap: '10px',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#f8fafc', marginBottom: '4px' }}>
+                          {board.name} {isSelected && '👑 (Aktivna)'}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                          {board.price === 0 ? '🟢 Besplatna (Početna)' : `Cijena: ${board.price} bodova`}
+                        </div>
+                        <div style={{
+                          width: '100%', height: '40px', background: board.boardBackground,
+                          borderRadius: '6px', border: `1px solid ${board.linesColor}`, marginTop: '8px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                          <span style={{ fontSize: '0.7rem', color: board.linesColor, fontWeight: 'bold' }}>Mlin Ploča</span>
+                        </div>
+                      </div>
+
+                      {board.price > 0 && !board.isDefault ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBoardForUser(board.id)}
+                          style={{
+                            width: '100%',
+                            padding: '7px',
+                            backgroundColor: isUnlocked ? '#ef4444' : '#22c55e',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.78rem',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          {isUnlocked ? '✖ Oduzmi igraču' : '✔ Dodijeli igraču'}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontStyle: 'italic', textAlign: 'center' }}>
+                          Uvijek dostupna
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ==================================================================== */}
+          {/* 8. EKRAN: UPRAVLJANJE SUSTAVOM BODOVANJA                             */}
           {/* ==================================================================== */}
           {activeAdminTab === 'scoring' && (
             <div style={S.card}>

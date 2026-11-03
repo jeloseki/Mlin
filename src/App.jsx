@@ -13,6 +13,7 @@ import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 import { exportProfileToPDF } from './utils/pdfExport';
+import { getStoredBoards, evaluateGameBoards } from './boardsData';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -428,6 +429,13 @@ export default function App() {
     BLACK: { name: '', id: 2 }
   });
 
+  const [activeBoardTheme, setActiveBoardTheme] = useState(() => {
+    const liveProf = loadSyncedProfile();
+    const boards = getStoredBoards();
+    const activeId = liveProf.activeBoard || 'classic-blue-gold';
+    return boards.find(b => b.id === activeId) || boards[0];
+  });
+
   const [board, setBoard] = useState(Array(24).fill(null));
   const [turn, setTurn] = useState('WHITE');
   const [unplaced, setUnplaced] = useState({ WHITE: 9, BLACK: 9 });
@@ -462,6 +470,13 @@ export default function App() {
     exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog));
   };
 
+  useEffect(() => {
+    const boards = getStoredBoards();
+    const activeId = profile.activeBoard || 'classic-blue-gold';
+    const foundTheme = boards.find(b => b.id === activeId) || boards[0];
+    setActiveBoardTheme(foundTheme);
+  }, [profile.activeBoard]);
+  
   useEffect(() => {
     const refreshRules = () => {
       const saved = localStorage.getItem('mlin_scoring_rules');
@@ -1254,6 +1269,56 @@ export default function App() {
                 setProfileTab('BADGES');
               }}>{t.tabBadges}</button>
               <button className={`tab-btn ${profileTab === 'HISTORY' ? 'active' : ''}`} onClick={() => setProfileTab('HISTORY')}>{t.tabHistory}</button>
+              <button className={`tab-btn ${profileTab === 'BOARDS' ? 'active' : ''}`} onClick={() => setProfileTab('BOARDS')}>🎨 Ploča</button>
+            </div>
+          )}
+
+          {profileTab === 'BOARDS' && (
+            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+              {(() => {
+                const liveProfile = loadSyncedProfile();
+                const unlockedBoardIds = Array.isArray(liveProfile?.unlockedBoards) ? liveProfile.unlockedBoards : ['classic-wood'];
+                const allBoards = getStoredBoards();
+
+                return allBoards.map((board) => {
+                  const isUnlocked = board.price === 0 || board.isDefault || unlockedBoardIds.includes(board.id);
+                  const isSelected = (liveProfile.activeBoard || 'classic-wood') === board.id;
+
+                  return (
+                    <div
+                      key={board.id}
+                      onClick={() => {
+                        if (!isUnlocked) return;
+                        const updated = { ...liveProfile, activeBoard: board.id };
+                        updateProfileAndSave(updated);
+                        setActiveBoardTheme(board);
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 14px', borderRadius: '8px',
+                        background: isSelected ? 'rgba(56, 189, 248, 0.15)' : '#0f172a',
+                        border: isSelected ? '2px solid #38bdf8' : (isUnlocked ? '1px solid #334155' : '1px solid #1e293b'),
+                        opacity: isUnlocked ? 1 : 0.45,
+                        cursor: isUnlocked ? 'pointer' : 'not-allowed'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          width: '32px', height: '32px', background: board.boardBackground,
+                          borderRadius: '6px', border: `1px solid ${board.linesColor}`
+                        }} />
+                        <div style={{ textAlign: 'left' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc' }}>{board.name}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                            {isUnlocked ? (isSelected ? '✨ Aktivna tema' : '✔ Otključano (Klikni za odabir)') : '🔒 Zaključano'}
+                          </div>
+                        </div>
+                      </div>
+                      {isSelected && <span style={{ fontSize: '1.1rem' }}>👑</span>}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
 
@@ -1656,6 +1721,7 @@ export default function App() {
                 <Board
                   board={board} selectedNode={currentActiveNode} validMoves={validMoves} removableNodes={removableNodes} mustRemove={mustRemove}
                   turn={turn} isAIMode={onlineGameId ? false : isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
+                  theme={activeBoardTheme} // <-- OVDJE PROSLJEĐUJEMO TEMU PLOČE
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
                     if (onlineGameId && turn !== myColor) return;
