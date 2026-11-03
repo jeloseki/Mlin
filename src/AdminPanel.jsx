@@ -185,7 +185,20 @@ export default function AdminPanel() {
   // --- STANJA: PROFILI IGRAČA ---
   const [profiles, setProfiles] = useState(() => {
     const saved = localStorage.getItem('mlin_admin_profiles');
-    return saved ? JSON.parse(saved) : [DEFAULT_IVICA];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Osiguraj da DEFAULT_IVICA uvijek postoji u listi
+          const hasIvica = parsed.some(p => p.id === 'admin-ivica' || p.name.toLowerCase() === 'ivica');
+          if (!hasIvica) {
+            return [DEFAULT_IVICA, ...parsed];
+          }
+          return parsed;
+        }
+      } catch (e) { }
+    }
+    return [DEFAULT_IVICA];
   });
 
   const [name, setName] = useState('');
@@ -202,14 +215,29 @@ export default function AdminPanel() {
   useEffect(() => {
     const syncProfiles = () => {
       const saved = localStorage.getItem('mlin_admin_profiles');
+      let currentList = [DEFAULT_IVICA];
+
       if (saved) {
         try {
-          setProfiles(JSON.parse(saved));
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            currentList = parsed;
+          }
         } catch (err) {
           console.error('Greška pri sinkronizaciji profila:', err);
         }
       }
+
+      // GARANCIJA: Provjeri postoji li Ivica u listi, ako ne - ubaci ga na prvo mjesto!
+      const hasIvica = currentList.some(p => p.id === 'admin-ivica' || (p.name && p.name.toLowerCase() === 'ivica'));
+      const finalProfiles = hasIvica ? currentList : [DEFAULT_IVICA, ...currentList];
+
+      setProfiles(finalProfiles);
+      localStorage.setItem('mlin_admin_profiles', JSON.stringify(finalProfiles));
     };
+
+    syncProfiles(); // Pokreni odmah pri učitavanju
+
     window.addEventListener('storage', syncProfiles);
     return () => window.removeEventListener('storage', syncProfiles);
   }, []);
@@ -665,17 +693,23 @@ export default function AdminPanel() {
   };
 
   const handleResetAllProfiles = () => {
-    if (!window.confirm('Jesi li siguran? Ovo će resetirati bodove, pobjede, poraze i postignuća za SVE profile na 0!')) return;
+    if (!window.confirm('Jesi li siguran? Ovo će resetirati bodove, pobjede, poraze i postignuća za ostale igrače na 0 (Ivica admin ostaje netaknut)!')) return;
 
-    const resetList = profiles.map(p => ({
-      ...p,
-      points: 0,
-      wins: 0,
-      losses: 0,
-      matchHistory: [],
-      achievements: [],
-      unlockedAvatars: []
-    }));
+    const resetList = profiles.map(p => {
+      // ZAŠTITA: Ivica (admin-ivica) se ne resetira na nulu!
+      if (p.id === 'admin-ivica' || p.name.toLowerCase() === 'ivica') {
+        return p;
+      }
+      return {
+        ...p,
+        points: 0,
+        wins: 0,
+        losses: 0,
+        matchHistory: [],
+        achievements: [],
+        unlockedAvatars: []
+      };
+    });
 
     setProfiles(resetList);
     localStorage.setItem('mlin_admin_profiles', JSON.stringify(resetList));
@@ -697,6 +731,7 @@ export default function AdminPanel() {
     }
 
     window.dispatchEvent(new Event('storage'));
+    alert('Uspješno resetirano! Admin profil je sačuvan.');
   };
 
   const toggleSelectDelete = (id) => {
@@ -708,10 +743,18 @@ export default function AdminPanel() {
       setIsDeleteMode(false);
       return;
     }
-    if (window.confirm(`Želite li obrisati označene profile (${selectedForDelete.length})?`)) {
-      const updated = profiles.filter(p => !selectedForDelete.includes(p.id));
-      setProfiles(updated);
-      localStorage.setItem('mlin_admin_profiles', JSON.stringify(updated));
+    // ZAŠTITA: Sprječavamo brisanje Ivice bez obzira je li označen
+    const cleanSelection = selectedForDelete.filter(id => id !== 'admin-ivica');
+
+    if (window.confirm(`Želite li obrisati označene profile (${cleanSelection.length})?`)) {
+      const updated = profiles.filter(p => !cleanSelection.includes(p.id));
+
+      // Osiguraj da Ivica nikad ne nestane iz liste
+      const hasIvica = updated.some(p => p.id === 'admin-ivica');
+      const finalProfiles = hasIvica ? updated : [DEFAULT_IVICA, ...updated];
+
+      setProfiles(finalProfiles);
+      localStorage.setItem('mlin_admin_profiles', JSON.stringify(finalProfiles));
       setSelectedForDelete([]);
       setIsDeleteMode(false);
     }
