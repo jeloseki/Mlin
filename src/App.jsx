@@ -13,7 +13,7 @@ import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 import { exportProfileToPDF } from './utils/pdfExport';
-import { getStoredBoards, evaluateGameBoards } from './boardsData';
+import { getStoredBoards } from './boardsData';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -431,9 +431,9 @@ export default function App() {
 
   const [activeBoardTheme, setActiveBoardTheme] = useState(() => {
     const liveProf = loadSyncedProfile();
-    const boards = getStoredBoards();
-    const activeId = liveProf.activeBoard || 'classic-blue-gold';
-    return boards.find(b => b.id === activeId) || boards[0];
+    const boardsList = getStoredBoards();
+    const activeBoardId = profile?.activeBoard || 'classic-blue-gold';
+    const activeTheme = boardsList.find(b => b.id === activeBoardId) || boardsList[0];
   });
 
   const [board, setBoard] = useState(Array(24).fill(null));
@@ -476,7 +476,7 @@ export default function App() {
     const foundTheme = boards.find(b => b.id === activeId) || boards[0];
     setActiveBoardTheme(foundTheme);
   }, [profile.activeBoard]);
-  
+
   useEffect(() => {
     const refreshRules = () => {
       const saved = localStorage.getItem('mlin_scoring_rules');

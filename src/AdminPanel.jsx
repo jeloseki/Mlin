@@ -45,18 +45,18 @@ const DEFAULT_SCORING_RULES = [
 
 const MENU_GROUPS = [
   {
-    id: 'boards',
-    label: '🎨 Teme Ploča',
-    items: [
-      { id: 'board_assign', label: '🖼️ Katalog i dodjela ploča' }
-    ]
-  },
-  {
     id: 'profiles',
     label: '👥 Igrači i Profili',
     items: [
       { id: 'profiles_list', label: '📋 Dostupni profili' },
       { id: 'profiles_create', label: '➕ Kreiraj / Uredi profil' }
+    ]
+  },
+    {
+    id: 'boards',
+    label: '🎨 Teme Ploča',
+    items: [
+      { id: 'board_assign', label: '🖼️ Katalog i dodjela ploča' }
     ]
   },
   {

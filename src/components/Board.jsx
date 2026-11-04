@@ -28,19 +28,14 @@ export default function Board({
   aiColor,
   mustRemove,
   focusedNode,
-  theme // <-- Primamo aktivnu temu kao prop
+  theme // Primamo temu odabrane ploče
 }) {
   const isAITurn = isAIMode && turn === aiColor;
   const boardRef = useRef(null);
 
-  // Fallback na plavo-zlatnu temu ako prop slučajno izostane
-  const currentTheme = theme || {
-    background: '#071524',
-    boardBackground: '#0b1d3a',
-    linesColor: '#d4af37',
-    nodeColor: '#1e3a8a',
-    nodeHoverColor: '#3b82f6'
-  };
+  // Izvlacimo boje iz teme, s fiksnim fallbackom na zlatno-plavo ako tema fali
+  const linesColor = theme?.linesColor || '#d4af37';
+  const boardBgColor = theme?.boardBackground || '';
 
   const findClosestNode = (clientX, clientY) => {
     if (!boardRef.current) return null;
@@ -75,43 +70,29 @@ export default function Board({
       className="board-wrapper" 
       ref={boardRef}
       onMouseUp={handleBoardMouseUp}
-      style={{
-        background: currentTheme.background,
-        borderRadius: '16px',
-        padding: '12px',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-        transition: 'background 0.3s ease'
-      }}
     >
       <svg 
         className="board-svg" 
         viewBox="0 0 100 100"
-        style={{
-          backgroundColor: currentTheme.boardBackground,
-          borderRadius: '10px',
-          transition: 'background-color 0.3s ease'
-        }}
+        style={boardBgColor ? { backgroundColor: boardBgColor, borderRadius: '10px' } : {}}
       >
-        {/* Kvadrati ploče */}
-        <rect x="10" y="10" width="80" height="80" fill="none" stroke={currentTheme.linesColor} strokeWidth="2.5" />
-        <rect x="23.33" y="23.33" width="53.33" height="53.33" fill="none" stroke={currentTheme.linesColor} strokeWidth="2.5" />
-        <rect x="36.66" y="36.66" width="26.68" height="26.68" fill="none" stroke={currentTheme.linesColor} strokeWidth="2.5" />
+        <rect x="10" y="10" width="80" height="80" fill="none" stroke={linesColor} strokeWidth="2.5" />
+        <rect x="23.33" y="23.33" width="53.33" height="53.33" fill="none" stroke={linesColor} strokeWidth="2.5" />
+        <rect x="36.66" y="36.66" width="26.68" height="26.68" fill="none" stroke={linesColor} strokeWidth="2.5" />
 
-        {/* Spojnice kvadrata */}
-        <line x1="50" y1="10" x2="50" y2="36.66" stroke={currentTheme.linesColor} strokeWidth="2.5" />
-        <line x1="90" y1="50" x2="63.33" y2="50" stroke={currentTheme.linesColor} strokeWidth="2.5" />
-        <line x1="50" y1="90" x2="50" y2="63.33" stroke={currentTheme.linesColor} strokeWidth="2.5" />
-        <line x1="10" y1="50" x2="36.66" y2="50" stroke={currentTheme.linesColor} strokeWidth="2.5" />
+        <line x1="50" y1="10" x2="50" y2="36.66" stroke={linesColor} strokeWidth="2.5" />
+        <line x1="90" y1="50" x2="63.33" y2="50" stroke={linesColor} strokeWidth="2.5" />
+        <line x1="50" y1="90" x2="50" y2="63.33" stroke={linesColor} strokeWidth="2.5" />
+        <line x1="10" y1="50" x2="36.66" y2="50" stroke={linesColor} strokeWidth="2.5" />
 
-        {/* Točkice (čvorovi) */}
         {NODE_POSITIONS.map((pos, i) => (
           <circle
             key={`dot-${i}`}
             cx={pos.x}
             cy={pos.y}
             r="2.2"
-            fill={currentTheme.linesColor}
-            stroke={currentTheme.linesColor}
+            fill={linesColor}
+            stroke={linesColor}
             strokeWidth="0.5"
             opacity="0.9"
           />
@@ -145,9 +126,9 @@ export default function Board({
             {piece && (
               <div
                 className={`piece-slot ${piece === 'WHITE' ? 'piece-white' : 'piece-black'} ${isSelected ? 'selected-piece' : ''} ${inMill ? 'in-mill-piece' : ''} ${isRemovable ? 'pulse-remove' : ''} ${canPickPiece || isRemovable ? 'draggable' : ''}`}
-                style={{
-                  background: piece === 'WHITE' ? currentTheme.whitePiece : currentTheme.blackPiece
-                }}
+                style={theme?.whitePiece && theme?.blackPiece ? {
+                  background: piece === 'WHITE' ? theme.whitePiece : theme.blackPiece
+                } : {}}
                 onMouseDown={(e) => {
                   if (isAITurn) return;
                   e.stopPropagation();
