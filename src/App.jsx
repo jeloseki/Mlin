@@ -461,6 +461,28 @@ export default function App() {
     { id: 'rule-prot', icon: '🛡️', title: 'Zaštita', value: 'Bodovi ne mogu pasti ispod 0' }
   ];
 
+  // FUNKCIJE SORTIRANJA i PAGINACIJE
+  const [sortBy, setSortBy] = useState('newest'); // 'newest', 'oldest', 'wins', 'losses'
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5; // Prikazivat ćemo 5 mečeva po stranici
+
+  // Pretpostavimo da je tvoja lista mečeva u varijabli profile.matchHistory ili history
+  const history = profile?.matchHistory || [];
+
+  // 1. SORTIRANJE
+  const sortedHistory = [...history].sort((a, b) => {
+    if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
+    if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
+    if (sortBy === 'wins') return (b.won ? 1 : 0) - (a.won ? 1 : 0);
+    if (sortBy === 'losses') return (a.won ? 0 : 1) - (b.won ? 0 : 1);
+    return 0;
+  });
+
+  // 2. PAGINACIJA
+  const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
+
   const [activeScoringRules, setActiveScoringRules] = useState(() => {
     const saved = localStorage.getItem('mlin_scoring_rules');
     return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
@@ -701,7 +723,7 @@ export default function App() {
     setSetupStep('COIN_TOSS');
   };
 
-  const triggerCoinFlip = (choice) => {
+const triggerCoinFlip = (choice) => {
     if (isFlipping) return;
     setIsFlipping(true);
     playAudioEffect('coinSpin', soundEnabled);
@@ -719,6 +741,20 @@ export default function App() {
 
       setCoinResultText(isHeads ? t.heads : t.tails);
       setCoinWinner(winnerId);
+
+      // --- PROVJERAVA I OTKLJUČAVA POSTIGNUĆA ZA NOVČIĆ ---
+      if (isWinnerP1) {
+        window.__coinLossStreak = 0;
+        const updatedWithCoin = evaluateGameAchievements(profile, { coinTossWon: true });
+        setProfile(updatedWithCoin);
+      } else {
+        window.__coinLossStreak = (window.__coinLossStreak || 0) + 1;
+        if (window.__coinLossStreak >= 3) {
+          const updatedWithBadLuck = evaluateGameAchievements(profile, { coinTossLossStreak: window.__coinLossStreak });
+          setProfile(updatedWithBadLuck);
+        }
+      }
+      // ----------------------------------------------------
 
       if (isAIMode && winnerId === 2) {
         setPlayers({
@@ -780,15 +816,27 @@ export default function App() {
       unlockedAvatars: prevAvs
     };
 
+    const opponentColor = playerColor === 'WHITE' ? 'BLACK' : 'WHITE';
+    const myCaptured = captured?.[playerColor] ?? (isWin ? 7 : 0);
+    const enemyCaptured = captured?.[opponentColor] ?? (isWin ? 0 : 7);
+
     const afterAchs = evaluateGameAchievements(updatedBase, {
       isWin,
+      playerColor, // <-- OVO JE FALILO (sada rade Bijela snaga i Crna magija!)
       isAIMode: isVsAI,
       aiDifficulty: isVsAI ? aiDifficulty : 'MEDIUM',
-      millsFormed: millsCount[playerColor] || (isWin ? 1 : 0),
-      wonByBlock: false,
-      lostByBlock: false,
-      piecesCaptured: captured[playerColor] || (isWin ? 7 : 0),
-      totalTurns: turnCount || 30
+      millsFormed: millsCount?.[playerColor] ?? (isWin ? 1 : 0),
+      opponentMillsFormed: millsCount?.[opponentColor] ?? 0,
+      piecesCaptured: myCaptured,
+      playerPiecesLost: enemyCaptured,
+      opponentPiecesLost: myCaptured,
+      playerPiecesRemaining: 9 - enemyCaptured,
+      opponentPiecesRemaining: 9 - myCaptured,
+      // Ako protivnik ima više od 2 figure na kraju, znači da je partija završila blokadom!
+      wonByBlock: isWin && (9 - myCaptured) > 2,
+      lostByBlock: !isWin && (9 - enemyCaptured) > 2,
+      totalTurns: turnCount || 30,
+      coinTossWon: Boolean(window.__lastCoinTossWon) // <-- Za "Sreća na novčiću"
     });
 
     const fullAchCat = loadFullAchievementsCatalog(achievementsCatalog);
@@ -1357,17 +1405,87 @@ export default function App() {
           )}
 
           {profileTab === 'HISTORY' && (
-            <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {(!profile.matchHistory || profile.matchHistory.length === 0) ? (
-                <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>Nema odigranih mečeva.</div>
-              ) : (
-                profile.matchHistory.map((m, idx) => (
-                  <div key={idx} className="history-item">
-                    <span>vs <strong>{m.vs}</strong> ({m.date})</span>
-                    <span className={m.isWin ? 'win-text' : 'loss-text'}>{m.isWin ? t.win : t.loss} ({m.score})</span>
-                  </div>
-                ))
+            <div>
+              {/* KONTROLE ZA SORTIRANJE (Prikazuju se samo ako ima mečeva) */}
+              {profile?.matchHistory && profile.matchHistory.length > 0 && (
+                <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Sortiraj:</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
+                    style={{ background: '#071524', color: '#fff', border: '1px solid #d4af37', padding: '4px 8px', borderRadius: '6px', fontSize: '0.85rem' }}
+                  >
+                    <option value="newest">Najnovije prvo</option>
+                    <option value="oldest">Najstarije prvo</option>
+                    <option value="wins">Samo pobjede</option>
+                    <option value="losses">Samo porazi</option>
+                  </select>
+                </div>
               )}
+
+              {/* LOGIKA ZA SORTIRANJE I PAGINACIJU */}
+              {(() => {
+                const history = profile?.matchHistory || [];
+
+                // 1. Sortiranje prema tvojim poljima (m.date i m.isWin)
+                const sortedHistory = [...history].sort((a, b) => {
+                  if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
+                  if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
+                  if (sortBy === 'wins') return (b.isWin ? 1 : 0) - (a.isWin ? 1 : 0);
+                  if (sortBy === 'losses') return (a.isWin ? 0 : 1) - (b.isWin ? 0 : 1);
+                  return 0;
+                });
+
+                // 2. Paginacija (prikazuje po 5 stavki, automatski se širi i na 20+ mečeva)
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
+
+                if (history.length === 0) {
+                  return <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>Nema odigranih mečeva.</div>;
+                }
+
+                return (
+                  <>
+                    <div style={{ minHeight: '150px' }}>
+                      {currentItems.map((m, idx) => (
+                        <div key={idx} className="history-item">
+                          <span>vs <strong>{m.vs}</strong> ({m.date})</span>
+                          <span className={m.isWin ? 'win-text' : 'loss-text'}>{m.isWin ? t.win : t.loss} ({m.score})</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Gumbi za paginaciju - pojavljuju se samo ako ima više od 5 mečeva */}
+                    {totalPages > 1 && (
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '12px', alignItems: 'center' }}>
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                          className="tab-btn"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === 1 ? 0.4 : 1 }}
+                        >
+                          Prethodna
+                        </button>
+
+                        <span style={{ fontSize: '0.8rem', color: '#fce055', fontWeight: 'bold' }}>
+                          {currentPage} / {totalPages}
+                        </span>
+
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className="tab-btn"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === totalPages ? 0.4 : 1 }}
+                        >
+                          Sljedeća
+                        </button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 

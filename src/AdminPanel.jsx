@@ -52,7 +52,7 @@ const MENU_GROUPS = [
       { id: 'profiles_create', label: '➕ Kreiraj / Uredi profil' }
     ]
   },
-    {
+  {
     id: 'boards',
     label: '🎨 Teme Ploča',
     items: [
@@ -63,7 +63,7 @@ const MENU_GROUPS = [
     id: 'achievements',
     label: '🏅 Postignuća',
     items: [
-      { id: 'ach_assign', label: '🎖️ Katalog i dodjela' },
+      { id: 'ach_assign', label: '🎖️ Katalog i dodjela postignuća' },
       { id: 'ach_create', label: '✨ Stvori postignuće' }
     ]
   },
@@ -71,7 +71,7 @@ const MENU_GROUPS = [
     id: 'avatars',
     label: '🦁 Avatari',
     items: [
-      { id: 'avatar_assign', label: '🎭 Katalog i dodjela' },
+      { id: 'avatar_assign', label: '🎭 Katalog i dodjela avatara' },
       { id: 'avatar_create', label: '✨ Stvori avatar' }
     ]
   },
@@ -136,6 +136,18 @@ const isAvatarCreated = (av) => {
   if (av.id && av.id.startsWith('av_')) {
     const num = parseInt(av.id.replace('av_', ''), 10);
     if (!isNaN(num) && num > 80) return true;
+  }
+  return false;
+};
+
+// Pomoćna funkcija koja pouzdano prepoznaje je li postignuće ručno stvoreno u Admin panelu
+const isAchievementCreated = (ach) => {
+  if (!ach || ach.isDefault) return false;
+  if (ach.isCustom === true) return true;
+  if (ach.id && !ach.id.startsWith('ach_')) return true;
+  if (ach.id && ach.id.startsWith('ach_')) {
+    const num = parseInt(ach.id.replace('ach_', ''), 10);
+    if (!isNaN(num) && num > 100) return true;
   }
   return false;
 };
@@ -345,12 +357,23 @@ export default function AdminPanel() {
       desc: newAchData.desc.trim(),
       icon: newAchData.icon || '🏅',
       tier: newAchData.tier || 'BRONZE',
-      points: Number(newAchData.points) || 10
+      points: Number(newAchData.points) || 10,
+      isDefault: false,
+      isCustom: true
     };
 
-    setAchievementsList(prev => [item, ...prev]);
-    await saveAchievementToFirebase(item);
+    const updatedList = [item, ...achievementsList];
+    setAchievementsList(updatedList);
+    localStorage.setItem('mlin_custom_achievements', JSON.stringify(updatedList.filter(a => isAchievementCreated(a))));
+
+    try {
+      await saveAchievementToFirebase(item);
+    } catch (err) {
+      console.warn('Greška pri spremanju postignuća na Firebase:', err);
+    }
+
     setNewAchData({ title: '', desc: '', icon: '🏅', tier: 'BRONZE', points: 10 });
+    setAchTierFilter('CREATED');
     setActiveAdminTab('ach_assign');
   };
 
@@ -366,7 +389,9 @@ export default function AdminPanel() {
   };
 
   const handleSaveEditAch = async (achId) => {
+    const existing = achievementsList.find(a => a.id === achId);
     const updatedItem = {
+      ...existing,
       id: achId,
       ...editAchData,
       points: Number(editAchData.points) || 10
@@ -377,10 +402,55 @@ export default function AdminPanel() {
     setEditingAchId(null);
   };
 
-  const handleDeleteAch = async (id) => {
-    if (!window.confirm('Sigurno želiš trajno obrisati ovo postignuće s Firebasea?')) return;
-    setAchievementsList(prev => prev.filter(a => a.id !== id));
-    await deleteAchievementFromFirebase(id);
+  const handleDeleteCreatedAchievement = async (achId) => {
+    const target = achievementsList.find(a => a.id === achId);
+    if (!target || !isAchievementCreated(target)) {
+      alert('Moguće je brisati samo ručno stvorena postignuća!');
+      return;
+    }
+
+    if (!window.confirm(`Jeste li sigurni da želite trajno obrisati stvoreno postignuće "${target.title}"?`)) return;
+
+    try {
+      const updatedList = achievementsList.filter(a => a.id !== achId);
+      setAchievementsList(updatedList);
+
+      localStorage.setItem('mlin_custom_achievements', JSON.stringify(updatedList.filter(a => isAchievementCreated(a))));
+      localStorage.setItem('mlin_achievements_catalog', JSON.stringify(updatedList));
+
+      if (typeof deleteAchievementFromFirebase === 'function') {
+        try {
+          await deleteAchievementFromFirebase(achId);
+        } catch (err) {
+          console.warn('Firebase brisanje postignuća nije uspjelo:', err);
+        }
+      }
+
+      const cleanedProfiles = profiles.map(p => ({
+        ...p,
+        achievements: Array.isArray(p.achievements)
+          ? p.achievements.filter(id => id !== achId)
+          : []
+      }));
+      setProfiles(cleanedProfiles);
+      localStorage.setItem('mlin_admin_profiles', JSON.stringify(cleanedProfiles));
+
+      const activeRaw = localStorage.getItem('mlin_user_profile');
+      if (activeRaw) {
+        try {
+          const parsedActive = JSON.parse(activeRaw);
+          if (Array.isArray(parsedActive.achievements)) {
+            parsedActive.achievements = parsedActive.achievements.filter(id => id !== achId);
+            localStorage.setItem('mlin_user_profile', JSON.stringify(parsedActive));
+          }
+        } catch (err) { }
+      }
+
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error('Greška pri brisanju stvorenog postignuća:', e);
+      alert('Došlo je do greške prilikom brisanja.');
+    }
   };
 
   const handleToggleAchievementForUser = async (achId) => {
@@ -1342,7 +1412,7 @@ export default function AdminPanel() {
                 </div>
               </div>
 
-              {/* PRETRAGA I FILTERI */}
+              {/* PRETRAGA I FILTERI ZA POSTIGNUĆA (uključujući podkategoriju Stvorena) */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '10px', flexWrap: 'wrap' }}>
                 <input
                   type="text"
@@ -1353,23 +1423,27 @@ export default function AdminPanel() {
                 />
 
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {['ALL', ...Object.keys(ACHIEVEMENT_TIERS)].map(key => (
+                  {[
+                    { key: 'ALL', label: 'Sve' },
+                    ...Object.keys(ACHIEVEMENT_TIERS).map(k => ({ key: k, label: ACHIEVEMENT_TIERS[k].label })),
+                    { key: 'CREATED', label: '✨ Stvorena' }
+                  ].map(item => (
                     <button
-                      key={key}
+                      key={item.key}
                       type="button"
-                      onClick={() => setAchTierFilter(key)}
+                      onClick={() => setAchTierFilter(item.key)}
                       style={{
                         padding: '6px 12px',
                         fontSize: '0.75rem',
                         borderRadius: '6px',
                         border: '1px solid #334155',
-                        background: achTierFilter === key ? '#3b82f6' : '#1e293b',
-                        color: achTierFilter === key ? '#fff' : '#94a3b8',
+                        background: achTierFilter === item.key ? '#3b82f6' : '#1e293b',
+                        color: achTierFilter === item.key ? '#fff' : '#94a3b8',
                         cursor: 'pointer',
-                        fontWeight: achTierFilter === key ? 'bold' : 'normal'
+                        fontWeight: achTierFilter === item.key ? 'bold' : 'normal'
                       }}
                     >
-                      {key === 'ALL' ? 'Sve' : ACHIEVEMENT_TIERS[key].label}
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -1383,16 +1457,26 @@ export default function AdminPanel() {
 
                   {achievementsList
                     .filter(a => {
-                      const matchesTier = achTierFilter === 'ALL' || a.tier === achTierFilter;
-                      const matchesSearch = a.title?.toLowerCase().includes(achSearch.toLowerCase()) ||
+                      const created = isAchievementCreated(a);
+                      const matchesFilter =
+                        achTierFilter === 'ALL'
+                          ? true
+                          : achTierFilter === 'CREATED'
+                          ? created
+                          : a.tier === achTierFilter;
+
+                      const matchesSearch =
+                        a.title?.toLowerCase().includes(achSearch.toLowerCase()) ||
                         a.desc?.toLowerCase().includes(achSearch.toLowerCase());
-                      return matchesTier && matchesSearch;
+
+                      return matchesFilter && matchesSearch;
                     })
                     .map((ach) => {
+                      const created = isAchievementCreated(ach);
                       const userAchs = Array.isArray(currentSelectedProfile?.achievements) ? currentSelectedProfile.achievements : [];
                       const isAssigned = userAchs.includes(ach.id);
                       const tierData = ACHIEVEMENT_TIERS[ach.tier] || ACHIEVEMENT_TIERS.BRONZE;
-                      const outerBorder = isAssigned ? '#22c55e' : '#334155';
+                      const outerBorder = created ? '#38bdf8' : (isAssigned ? '#22c55e' : '#334155');
                       const isEditing = editingAchId === ach.id;
 
                       return (
@@ -1454,7 +1538,7 @@ export default function AdminPanel() {
                               </div>
                             </div>
                           ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '10px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span style={{ fontSize: '1.5rem', minWidth: '34px', textAlign: 'center' }}>{ach.icon || '🏅'}</span>
                                 <div>
@@ -1464,7 +1548,11 @@ export default function AdminPanel() {
                                       {tierData.label}
                                     </span>
                                     <span style={{ fontSize: '0.75rem', color: '#fbbf24', fontWeight: 'bold' }}>+{ach.points} B</span>
-                                    <span style={{ fontSize: '0.65rem', color: '#64748b' }}>({ach.id})</span>
+                                    {created ? (
+                                      <span style={{ fontSize: '0.68rem', color: '#38bdf8', fontWeight: 'bold' }}>✨ Stvoreno ({ach.id})</span>
+                                    ) : (
+                                      <span style={{ fontSize: '0.65rem', color: '#64748b' }}>({ach.id})</span>
+                                    )}
                                   </div>
                                   <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc}</div>
                                 </div>
@@ -1488,14 +1576,26 @@ export default function AdminPanel() {
                                   ✏️
                                 </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteAch(ach.id)}
-                                  title="Trajno obriši s Firebasea"
-                                  style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }}
-                                >
-                                  🗑️
-                                </button>
+                                {/* GUMB ZA BRISANJE PRIKAZUJE SE SAMO ZA RUČNO STVORENA POSTIGNUĆA */}
+                                {created && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCreatedAchievement(ach.id)}
+                                    title="Trajno obriši stvoreno postignuće"
+                                    style={{
+                                      padding: '6px 10px',
+                                      backgroundColor: '#7f1d1d',
+                                      color: '#fca5a5',
+                                      border: '1px solid #ef4444',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      fontSize: '0.73rem',
+                                      fontWeight: 'bold'
+                                    }}
+                                  >
+                                    🗑️ Obriši stvoreno
+                                  </button>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1516,7 +1616,7 @@ export default function AdminPanel() {
                 <div>
                   <h2 style={{ color: '#fbbf24', margin: 0 }}>✨ Stvori novo postignuće</h2>
                   <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
-                    Novo postignuće se odmah sprema u Firebase kolekciju i postaje dostupno za dodjelu svim igračima.
+                    Novo postignuće ulazi u katalog pod kategoriju "Stvorena", sprema se u bazu i može se dodjeljivati ili brisati!
                   </p>
                 </div>
                 <button type="button" onClick={() => setActiveAdminTab('ach_assign')} style={S.btn('#334155', '#cbd5e1')}>
