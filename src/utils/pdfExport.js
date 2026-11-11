@@ -1,34 +1,35 @@
 // src/utils/pdfExport.js
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
+import { getLocalizedAchievement } from '../achievementsData'; // Uvezi funkciju za prijevod postignuća
 
 const RANK_STEPS = [
-  { min: 0, hr: 'Bronca III' },
-  { min: 50, hr: 'Bronca II' },
-  { min: 120, hr: 'Bronca I' },
-  { min: 200, hr: 'Srebro III' },
-  { min: 300, hr: 'Srebro II' },
-  { min: 420, hr: 'Srebro I' },
-  { min: 560, hr: 'Zlato III' },
-  { min: 720, hr: 'Zlato II' },
-  { min: 900, hr: 'Zlato I' },
-  { min: 1100, hr: 'Platina III' },
-  { min: 1350, hr: 'Platina II' },
-  { min: 1600, hr: 'Platina I' },
-  { min: 1900, hr: 'Dijamant III' },
-  { min: 2250, hr: 'Dijamant II' },
-  { min: 2650, hr: 'Dijamant I' },
-  { min: 3100, hr: 'Majstor' },
-  { min: 3800, hr: 'Velemajstor' }
+  { min: 0, hr: 'Bronca III', en: 'Bronze III' },
+  { min: 50, hr: 'Bronca II', en: 'Bronze II' },
+  { min: 120, hr: 'Bronca I', en: 'Bronze I' },
+  { min: 200, hr: 'Srebro III', en: 'Silver III' },
+  { min: 300, hr: 'Srebro II', en: 'Silver II' },
+  { min: 420, hr: 'Srebro I', en: 'Silver I' },
+  { min: 560, hr: 'Zlato III', en: 'Gold III' },
+  { min: 720, hr: 'Zlato II', en: 'Gold II' },
+  { min: 900, hr: 'Zlato I', en: 'Gold I' },
+  { min: 1100, hr: 'Platina III', en: 'Platinum III' },
+  { min: 1350, hr: 'Platina II', en: 'Platinum II' },
+  { min: 1600, hr: 'Platina I', en: 'Platinum I' },
+  { min: 1900, hr: 'Dijamant III', en: 'Diamond III' },
+  { min: 2250, hr: 'Dijamant II', en: 'Diamond II' },
+  { min: 2650, hr: 'Dijamant I', en: 'Diamond I' },
+  { min: 3100, hr: 'Majstor', en: 'Master' },
+  { min: 3800, hr: 'Velemajstor', en: 'Grandmaster' }
 ];
 
-const getRankName = (points) => {
+const getRankName = (points, lang = 'hr') => {
   let rank = RANK_STEPS[0];
   for (let r of RANK_STEPS) {
     if (points >= r.min) rank = r;
     else break;
   }
-  return rank.hr;
+  return lang === 'hr' ? rank.hr : rank.en;
 };
 
 const fetchFontAsBase64 = async (url) => {
@@ -42,12 +43,48 @@ const fetchFontAsBase64 = async (url) => {
   });
 };
 
-export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
+export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang = 'hr') => {
   try {
     if (!profile) {
-      alert('Nema podataka o profilu.');
+      alert(lang === 'en' ? 'No profile data found.' : 'Nema podataka o profilu.');
       return;
     }
+
+    const isEn = lang === 'en';
+
+    // Dvojezični labeli i tekstovi za PDF
+    const l = {
+      headerTitle: isEn ? 'MILL - OFFICIAL PROFILE REPORT' : 'MLIN - SLUŽBENI IZVJEŠTAJ PROFILA',
+      generated: isEn ? 'Generated:' : 'Generirano:',
+      gameName: isEn ? "Nine Men's Morris" : "Nine Men's Morris",
+      player: isEn ? 'Player' : 'Igrač',
+      rank: isEn ? 'Rank' : 'Rang',
+      status: isEn ? 'Status' : 'Status',
+      defaultBio: isEn ? 'Ready for game!' : 'Spreman za igru!',
+      totalPoints: isEn ? 'Total Points' : 'Ukupno Bodova',
+      ptUnit: isEn ? 'P' : 'B',
+      matchesPlayed: isEn ? 'Matches Played' : 'Odigrani Mečevi',
+      wins: isEn ? 'Wins' : 'Pobjede',
+      losses: isEn ? 'Losses' : 'Porazi',
+      winRate: isEn ? 'Win Rate' : 'Win Rate',
+      achievementsTitle: isEn ? 'Unlocked Achievements' : 'Osvojena Postignuća',
+      achColNum: '#',
+      achColName: isEn ? 'Achievement Name' : 'Naziv postignuća',
+      achColDesc: isEn ? 'Description' : 'Opis uvjeta',
+      achColPoints: isEn ? 'Points' : 'Bodovi',
+      noAchievements: isEn ? 'Player has no achievements unlocked yet.' : 'Igrač još nema otključanih postignuća.',
+      historyTitle: isEn ? 'Match History' : 'Povijest Mečeva',
+      histColOpponent: isEn ? 'Opponent' : 'Protivnik',
+      histColOutcome: isEn ? 'Outcome' : 'Ishod',
+      histColPoints: isEn ? 'Points' : 'Bodovi',
+      histColDate: isEn ? 'Date' : 'Datum',
+      victory: isEn ? 'VICTORY' : 'POBJEDA',
+      defeat: isEn ? 'DEFEAT' : 'PORAZ',
+      noHistory: isEn ? 'No match history recorded.' : 'Nema zabilježenih mečeva.',
+      footerApp: isEn ? 'Mill App • Official Report' : 'Aplikacija Mlin • Službeni izvještaj',
+      page: isEn ? 'Page' : 'Stranica',
+      of: isEn ? 'of' : 'od'
+    };
 
     const [regBase64, boldBase64] = await Promise.all([
       fetchFontAsBase64('/fonts/Roboto-Regular.ttf'),
@@ -61,43 +98,41 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
     doc.addFileToVFS('Roboto-Bold.ttf', boldBase64);
     doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
 
-    // === USKLAĐENO S PALETOM BOJA APLIKACIJE ===
-    const brandDark = [15, 23, 42];       // #0f172a (Glavna pozadina / tamne kartice)
-    const brandAccent = [217, 119, 6];    // #d97706 ili zlatna #fbbf24 za isticanja
-    const textMain = [30, 41, 59];        // Tekst glavni
-    const textMuted = [100, 116, 139];    // #64748b (Sivi sporedni tekst)
-    const successGreen = [22, 163, 74];   // #16a34a (Pobjede)
-    const errorRed = [220, 38, 38];       // #dc2626 (Porazi)
+    const brandDark = [15, 23, 42];
+    const textMain = [30, 41, 59];
+    const textMuted = [100, 116, 139];
+    const successGreen = [22, 163, 74];
+    const errorRed = [220, 38, 38];
 
-    // --- ZAGLAVLJE DOKUMENTA (Elegantno sa stiliziranom trakom) ---
+    // --- ZAGLAVLJE DOKUMENTA ---
     doc.setFillColor(...brandDark);
-    doc.rect(0, 0, 210, 32, 'F'); // Tamno plava zaglavlje traka preko cijelog vrha
+    doc.rect(0, 0, 210, 32, 'F');
 
     doc.setFont('Roboto', 'bold');
-    doc.setFontSize(20);
+    doc.setFontSize(16);
     doc.setTextColor(255, 255, 255);
-    doc.text('MLIN - SLUŽBENi IZVJEŠTAJ PROFILA', 15, 18);
+    doc.text(l.headerTitle, 15, 18);
 
     doc.setFont('Roboto', 'normal');
     doc.setFontSize(9);
-    doc.setTextColor(203, 213, 225); // Svijetlo siva
-    doc.text(`Generirano: ${new Date().toLocaleDateString('hr-HR')} | Nine Men's Morris`, 15, 25);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`${l.generated} ${new Date().toLocaleDateString(isEn ? 'en-US' : 'hr-HR')} | ${l.gameName}`, 15, 25);
 
     // --- KARTICA S PODACIMA O IGRAČU ---
     let currentY = 42;
-    doc.setFillColor(248, 250, 252); // Vrlo svijetla pozadina kartice
+    doc.setFillColor(248, 250, 252);
     doc.setDrawColor(203, 213, 225);
     doc.roundedRect(15, currentY, 180, 22, 3, 3, 'FD');
 
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(...textMain);
-    doc.text(`Igrač: ${profile.name || 'Igrač'}`, 20, currentY + 8);
+    doc.text(`${l.player}: ${profile.name || (isEn ? 'Player' : 'Igrač')}`, 20, currentY + 8);
 
     doc.setFont('Roboto', 'normal');
     doc.setFontSize(9.5);
     doc.setTextColor(...textMuted);
-    doc.text(`Rang: ${getRankName(Number(profile.points) || 0)}   |   Status: "${profile.bio || 'Spreman za igru!'}"`, 20, currentY + 15);
+    doc.text(`${l.rank}: ${getRankName(Number(profile.points) || 0, lang)}   |   ${l.status}: "${profile.bio || l.defaultBio}"`, 20, currentY + 15);
 
     currentY += 32;
 
@@ -114,9 +149,9 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
       theme: 'grid',
       styles: { font: 'Roboto', fontSize: 10, textColor: textMain, cellPadding: 4, halign: 'center' },
       headStyles: { fillColor: brandDark, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9.5 },
-      head: [['Ukupno Bodova', 'Odigrani Mečevi', 'Pobjede', 'Porazi', 'Win Rate']],
+      head: [[l.totalPoints, l.matchesPlayed, l.wins, l.losses, l.winRate]],
       body: [[
-        { content: `${points} B`, styles: { fontStyle: 'bold', textColor: [37, 99, 235] } },
+        { content: `${points} ${l.ptUnit}`, styles: { fontStyle: 'bold', textColor: [37, 99, 235] } },
         totalMatchCount.toString(),
         { content: wins.toString(), styles: { textColor: successGreen, fontStyle: 'bold' } },
         { content: losses.toString(), styles: { textColor: errorRed, fontStyle: 'bold' } },
@@ -130,7 +165,7 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(...textMain);
-    doc.text('Osvojena Postignuća', 15, currentY);
+    doc.text(l.achievementsTitle, 15, currentY);
     currentY += 4;
 
     const userAchIds = Array.isArray(profile.achievements) ? profile.achievements : [];
@@ -138,18 +173,21 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
     const unlockedAchievements = catalog.filter(a => userAchIds.includes(String(a.id).trim()));
 
     const achievementsData = unlockedAchievements.length > 0
-      ? unlockedAchievements.map((a, idx) => [
+      ? unlockedAchievements.map((rawA, idx) => {
+        const a = getLocalizedAchievement(rawA, lang); // Prevodimo postignuće na odabrani jezik
+        return [
           (idx + 1).toString(),
-          a.title || a.name || 'Postignuće',
+          a.title || a.name || (isEn ? 'Achievement' : 'Postignuće'),
           a.desc || a.description || '-',
-          `+${a.points || 10} B`
-        ])
-      : [['-', 'Igrač još nema otključanih postignuća.', '-', '-']];
+          `+${a.points || 10} ${l.ptUnit}`
+        ];
+      })
+      : [['-', l.noAchievements, '-', '-']];
 
     autoTable(doc, {
       startY: currentY,
       margin: { left: 15, right: 15 },
-      head: [['#', 'Naziv postignuća', 'Opis uvjeta', 'Bodovi']],
+      head: [[l.achColNum, l.achColName, l.achColDesc, l.achColPoints]],
       body: achievementsData,
       styles: { font: 'Roboto', fontSize: 9, textColor: textMain, cellPadding: 3.5 },
       headStyles: { fillColor: brandDark, fontStyle: 'bold', textColor: [255, 255, 255] },
@@ -173,30 +211,30 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(...textMain);
-    doc.text('Povijest Mečeva', 15, currentY);
+    doc.text(l.historyTitle, 15, currentY);
     currentY += 4;
 
     const history = Array.isArray(profile.matchHistory) ? profile.matchHistory : [];
     const historyData = history.length > 0
       ? history.map((m, idx) => {
-          const isWin = m.isWin;
-          return [
-            (idx + 1).toString(),
-            m.vs || 'Protivnik',
-            { 
-              content: isWin ? 'POBJEDA' : 'PORAZ', 
-              styles: { textColor: isWin ? successGreen : errorRed, fontStyle: 'bold' } 
-            },
-            m.score || '-',
-            m.date || '-'
-          ];
-        })
-      : [['-', 'Nema zabilježenih mečeva.', '-', '-', '-']];
+        const isWin = m.isWin;
+        return [
+          (idx + 1).toString(),
+          m.vs || (isEn ? 'Opponent' : 'Protivnik'),
+          {
+            content: isWin ? l.victory : l.defeat,
+            styles: { textColor: isWin ? successGreen : errorRed, fontStyle: 'bold' }
+          },
+          m.score || '-',
+          m.date || '-'
+        ];
+      })
+      : [['-', l.noHistory, '-', '-', '-']];
 
     autoTable(doc, {
       startY: currentY,
       margin: { left: 15, right: 15 },
-      head: [['#', 'Protivnik', 'Ishod', 'Bodovi', 'Datum']],
+      head: [[l.achColNum, l.histColOpponent, l.histColOutcome, l.histColPoints, l.histColDate]],
       body: historyData,
       styles: { font: 'Roboto', fontSize: 9, textColor: textMain, cellPadding: 3.5 },
       headStyles: { fillColor: brandDark, fontStyle: 'bold', textColor: [255, 255, 255] },
@@ -222,25 +260,24 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
       doc.setFontSize(8);
       doc.setTextColor(...textMuted);
       doc.text(
-        `Aplikacija Mlin • Službeni izvještaj`,
+        l.footerApp,
         15,
         doc.internal.pageSize.getHeight() - 8
       );
       doc.text(
-        `Stranica ${i} od ${pageCount}`,
+        `${l.page} ${i} ${l.of} ${pageCount}`,
         doc.internal.pageSize.getWidth() - 15,
         doc.internal.pageSize.getHeight() - 8,
         { align: 'right' }
       );
     }
 
-    // --- PREGLED U NOVOM TABU ---
     const pdfBlob = doc.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
     window.open(pdfUrl, '_blank');
 
   } catch (error) {
-    console.error('Greška pri generiranju PDF-a:', error);
-    alert('Došlo je do greške prilikom generiranja PDF-a. Provjerite konzolu.');
+    console.error('Error generating PDF:', error);
+    alert(lang === 'en' ? 'Failed to generate PDF.' : 'Greška prilikom generiranja PDF-a.');
   }
 };

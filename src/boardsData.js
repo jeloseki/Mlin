@@ -40,3 +40,23 @@ export const evaluateGameBoards = (profile) => {
     activeBoard: profile.activeBoard || defaultIds[0] || 'classic-wood'
   };
 };
+
+export const getLocalizedBoardName = (board, lang) => {
+  if (lang === 'en') {
+    const boardEnNames = {
+      'classic-blue-gold': 'Blue & Gold (Default)',
+      'classic-wood': 'Classic Wood',
+      'neon-cyberpunk': 'Neon Cyberpunk',
+      'marble-gold': 'Marble & Gold',
+      'midnight-dark': 'Midnight Dark',
+      'emerald-forest': 'Emerald Forest',
+      'royal-ruby': 'Royal Ruby',
+      'retro-arcade': 'Retro Arcade',
+      'matrix-code': 'Matrix Code',
+      'desert-sand': 'Desert Sand',
+      'ocean-deep': 'Ocean Deep'
+    };
+    return boardEnNames[board.id] || board.name;
+  }
+  return board.name;
+};

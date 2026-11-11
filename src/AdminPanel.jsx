@@ -128,6 +128,95 @@ const S = {
   })
 };
 
+// Provjerava je li vrijednost avatara/ikone zapravo slika (Base64 ili URL) ili obični emoji
+const isImageValue = (val) => {
+  if (!val || typeof val !== 'string') return false;
+  const trimmed = val.trim();
+  return (
+    trimmed.startsWith('data:image') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('/') ||
+    trimmed.length > 30 // sigurnosna provjera ako je dugi string/putanja a nije emoji
+  );
+};
+
+// Univerzalni prikaz avatara (nikada ne širi div niti kvari CSS!)
+const renderAvatarBadge = (val, size = 48, fontSize = '2rem') => {
+  const isImg = isImageValue(val);
+  return (
+    <div
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        minWidth: `${size}px`,
+        maxWidth: `${size}px`,
+        borderRadius: '50%',
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#0f172a',
+        border: '1px solid #334155',
+        flexShrink: 0,
+        boxSizing: 'border-box'
+      }}
+    >
+      {isImg ? (
+        <img
+          src={val}
+          alt="Avatar"
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block'
+          }}
+        />
+      ) : (
+        <span style={{ fontSize, lineHeight: 1 }}>{val || '🦁'}</span>
+      )}
+    </div>
+  );
+};
+
+// Pomoćna funkcija za kompresiju i pretvaranje uploadane slike u malu Base64 sliku (128x128)
+const compressUploadedImage = (file, callback) => {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_SIZE = 128;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > MAX_SIZE) {
+          height = Math.round((height * MAX_SIZE) / width);
+          width = MAX_SIZE;
+        }
+      } else {
+        if (height > MAX_SIZE) {
+          width = Math.round((width * MAX_SIZE) / height);
+          height = MAX_SIZE;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      callback(dataUrl);
+    };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+
 // Pomoćna funkcija koja pouzdano prepoznaje je li avatar ručno stvoren u Admin panelu
 const isAvatarCreated = (av) => {
   if (!av || av.isDefault) return false;
@@ -273,7 +362,7 @@ export default function AdminPanel() {
     }
   };
 
-  // Sinkronizacija profila ako se promijene u localStorageu
+  // Sinkronizacija profila ako se promijene u localStorageu (uključujući kad korisnik uploada sliku u igri)
   useEffect(() => {
     const syncProfiles = () => {
       const saved = localStorage.getItem('mlin_admin_profiles');
@@ -288,6 +377,22 @@ export default function AdminPanel() {
         } catch (err) {
           console.error('Greška pri sinkronizaciji profila:', err);
         }
+      }
+
+      // Provjeri i aktivni profil iz igre (ako je tamo promijenjena slika ili bodovi)
+      const activeRaw = localStorage.getItem('mlin_user_profile');
+      if (activeRaw) {
+        try {
+          const activeProf = JSON.parse(activeRaw);
+          if (activeProf && (activeProf.id || activeProf.name)) {
+            currentList = currentList.map(p => {
+              if ((p.id && p.id === activeProf.id) || (p.name && p.name === activeProf.name)) {
+                return { ...p, ...activeProf };
+              }
+              return p;
+            });
+          }
+        } catch (e) {}
       }
 
       const hasIvica = currentList.some(p => p.id === 'admin-ivica' || (p.name && p.name.toLowerCase() === 'ivica'));
@@ -1094,7 +1199,8 @@ export default function AdminPanel() {
                         cursor: (isDeleteMode && isIvica) ? 'default' : 'pointer',
                         opacity: (isDeleteMode && isIvica) ? 0.6 : 1,
                         userSelect: 'none',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        overflow: 'hidden'
                       }}
                     >
                       {isDeleteMode && !isIvica && (
@@ -1108,9 +1214,8 @@ export default function AdminPanel() {
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontSize: '2.2rem', lineHeight: 1 }}>{p.avatar}</span>
-                      </div>
+                      {/* OVDJE JE BIO BUG: Sada koristi renderAvatarBadge pa slika ne širi div! */}
+                      {renderAvatarBadge(p.avatar, 50, '2rem')}
 
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                         <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -1223,36 +1328,71 @@ export default function AdminPanel() {
                     </datalist>
                   </div>
 
-                  {/* AVATAR */}
+                  {/* AVATAR (Podržava i emoji iz kataloga i custom uploadanu sliku!) */}
                   <div>
-                    <label style={S.label}>Avatar:</label>
-                    <select value={avatar} onChange={e => setAvatar(e.target.value)} style={S.input}>
-                      {avatarsList
-                        .filter(av => {
-                          if (av.isDefault) return true;
-                          const userUnlocked = Array.isArray(profileBeingEdited?.unlockedAvatars)
-                            ? profileBeingEdited.unlockedAvatars
-                            : [];
-                          return userUnlocked.includes(av.id);
-                        })
-                        .map(av => {
-                          const created = isAvatarCreated(av);
-                          let labelType = 'Otključani';
-                          if (av.isDefault) {
-                            labelType = 'Početni';
-                          } else if (created) {
-                            labelType = 'Stvoreni';
-                          }
+                    <label style={S.label}>Avatar / Slika profila:</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {renderAvatarBadge(avatar, 42, '1.6rem')}
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <select
+                          value={avatar}
+                          onChange={e => setAvatar(e.target.value)}
+                          style={S.input}
+                        >
+                          {isImageValue(avatar) && (
+                            <option value={avatar}>🖼️ Vlastita uploadana slika</option>
+                          )}
+                          {avatarsList
+                            .filter(av => {
+                              if (av.isDefault) return true;
+                              const userUnlocked = Array.isArray(profileBeingEdited?.unlockedAvatars)
+                                ? profileBeingEdited.unlockedAvatars
+                                : [];
+                              return userUnlocked.includes(av.id);
+                            })
+                            .map(av => {
+                              const created = isAvatarCreated(av);
+                              let labelType = 'Otključani';
+                              if (av.isDefault) {
+                                labelType = 'Početni';
+                              } else if (created) {
+                                labelType = 'Stvoreni';
+                              }
+                              const displayIcon = isImageValue(av.icon) ? '🖼️' : av.icon;
+                              return (
+                                <option key={av.id} value={av.icon}>
+                                  {displayIcon} — {av.name} ({labelType})
+                                </option>
+                              );
+                            })}
+                        </select>
 
-                          return (
-                            <option key={av.id} value={av.icon}>
-                              {av.icon} — {av.name} ({labelType})
-                            </option>
-                          );
-                        })}
-                    </select>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '3px' }}>
-                      Prikazuju se početni te ovom igraču dodijeljeni (Otključani i Stvoreni) avatari.
+                        <label style={{
+                          display: 'inline-block',
+                          padding: '5px 10px',
+                          backgroundColor: '#334155',
+                          color: '#38bdf8',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          border: '1px solid #475569'
+                        }}>
+                          📁 Učitaj vlastitu sliku...
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                compressUploadedImage(file, (base64) => setAvatar(base64));
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
                   </div>
 
@@ -1325,7 +1465,9 @@ export default function AdminPanel() {
                       value={profileBeingEdited?.activeBoard || 'classic-blue-gold'}
                       onChange={e => {
                         const newBoardId = e.target.value;
-                        setProfiles(profiles.map(p => p.id === profileBeingEdited.id ? { ...p, activeBoard: newBoardId } : p));
+                        if (profileBeingEdited) {
+                          setProfiles(profiles.map(p => p.id === profileBeingEdited.id ? { ...p, activeBoard: newBoardId } : p));
+                        }
                       }}
                       style={S.input}
                     >
@@ -1540,7 +1682,7 @@ export default function AdminPanel() {
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '10px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ fontSize: '1.5rem', minWidth: '34px', textAlign: 'center' }}>{ach.icon || '🏅'}</span>
+                                {renderAvatarBadge(ach.icon || '🏅', 40, '1.4rem')}
                                 <div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{ach.title}</strong>
@@ -1781,10 +1923,11 @@ export default function AdminPanel() {
                           border: created ? '1px solid #38bdf8' : (isUnlocked ? '1px solid #22c55e' : '1px solid #334155'),
                           gap: '8px',
                           textAlign: 'center',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          overflow: 'hidden'
                         }}
                       >
-                        <div style={{ fontSize: '2rem' }}>{av.icon}</div>
+                        {renderAvatarBadge(av.icon, 52, '2rem')}
                         <div style={{ width: '100%', minWidth: 0 }}>
                           <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={av.name}>
                             {av.name}
@@ -1867,13 +2010,14 @@ export default function AdminPanel() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
 
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={S.label}>Emoji / Ikona (klikni i pritisni Win + . ili koristi tipkovnicu mobitela)</label>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <label style={S.label}>Emoji / Ikona ili vlastita slika</label>
+                    <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <input
                         type="text"
-                        required
-                        maxLength={4}
-                        value={newAvatarData.icon}
+                        required={!isImageValue(newAvatarData.icon)}
+                        maxLength={10}
+                        value={isImageValue(newAvatarData.icon) ? '' : newAvatarData.icon}
+                        placeholder="🦁"
                         onChange={(e) => setNewAvatarData({ ...newAvatarData, icon: e.target.value })}
                         style={{
                           ...S.input,
@@ -1885,14 +2029,34 @@ export default function AdminPanel() {
                         }}
                         title="Klikni ovdje pa pritisni Win + . (PC) ili otvori tipkovnicu (Mobitel)"
                       />
-                      <div>
-                        <div style={{ fontSize: '0.85rem', color: '#e2e8f0', fontWeight: 'bold' }}>
-                          Trenutni odabir: <span style={{ fontSize: '1.6rem', marginLeft: '6px' }}>{newAvatarData.icon}</span>
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                          💡 <strong>PC:</strong> Klikni u polje i stisni <code style={{ background: '#334155', padding: '2px 5px', borderRadius: '4px', color: '#fbbf24' }}>Win + .</code><br />
-                          📱 <strong>Mobitel/Tablet:</strong> Tapni polje i koristi emoji tipkovnicu svog uređaja.
-                        </div>
+
+                      <label style={{
+                        padding: '10px 14px',
+                        backgroundColor: '#334155',
+                        color: '#38bdf8',
+                        borderRadius: '8px',
+                        fontSize: '0.82rem',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        border: '1px solid #475569'
+                      }}>
+                        📁 Ili učitaj sliku...
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              compressUploadedImage(file, (base64) => setNewAvatarData({ ...newAvatarData, icon: base64 }));
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '0.85rem', color: '#e2e8f0', fontWeight: 'bold' }}>Pregled:</span>
+                        {renderAvatarBadge(newAvatarData.icon, 48, '1.8rem')}
                       </div>
                     </div>
                   </div>

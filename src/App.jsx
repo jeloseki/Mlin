@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import Board from './components/Board';
 import { BOARD_CONNECTIONS } from './constants/gameData';
@@ -9,11 +10,12 @@ import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboar
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { getStoredAchievements, ACHIEVEMENT_TIERS } from './achievementsData';
+import { getStoredAchievements, getLocalizedAchievement, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 import { exportProfileToPDF } from './utils/pdfExport';
-import { getStoredBoards } from './boardsData';
+import { getStoredBoards, getLocalizedBoardName } from './boardsData';
+import { TRANSLATIONS } from './translations';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -42,119 +44,6 @@ const getRankName = (points, lang) => {
     else break;
   }
   return lang === 'hr' ? rank.hr : rank.en;
-};
-
-const TRANSLATIONS = {
-  hr: {
-    menuTitle: "MLIN",
-    playOffline: "👥 Igraj 1 na 1 (Lokalno)",
-    playAI: "🤖 Igraj Protiv Računala (AI)",
-    playOnline: "🌐 Igraj Na Mreži (Uskoro)",
-    profile: "👤 Profil",
-    ranking: "🏆 Rangovi",
-    leaderboard: "🥇 Ljestvica Prvih 100",
-    scoring: "📊 Bodovanje",
-    settings: "⚙️ Postavke",
-    back: "⬅️ Natrag",
-    btnQuit: "🚪 Izađi u Izbornik",
-    soundEffects: "Zvučni Efekti",
-    on: "Uključeno",
-    off: "Isključeno",
-    tabStats: "Statistika",
-    tabBadges: "Postignuća",
-    tabHistory: "Povijest Mečeva",
-    editAvatarTitle: "Odaberi Avatara ili Učitaj Sliku",
-    uploadCustom: "📷 Učitaj vlastitu sliku sa uređaja",
-    rankClass: "Klasa / Rang",
-    totalPoints: "Bodovi",
-    winRate: "Postotak Pobjeda",
-    matches: "Pobjede / Porazi",
-    titleLabel: "Titula",
-    defaultTitle: "Početnik",
-    win: "Pobjeda",
-    loss: "Poraz",
-    scoringTitle: "Sustav Bodovanja",
-    rankingTitle: "Hijerarhija Rangova",
-    ptsRequired: "bodova",
-    aiDifficultyTitle: "Odaberite Težinu AI-ja",
-    easy: "🟢 Lako",
-    medium: "🟡 Srednje",
-    hard: "🔴 Teško",
-    titleNames: "Unesite Imena Igrača",
-    p1Label: "Igrač 1 (Max 12 slova):",
-    p2Label: "Igrač 2 (Max 12 slova):",
-    btnNextCoin: "Dalje na Novčić",
-    titleCoin: "Bacanje Novčića",
-    coinPrompt: "bira stranu novčića:",
-    heads: "GLAVA",
-    tails: "PISMO",
-    resultTitle: "Pala je",
-    winnerIs: "Pobjednik novčića je",
-    chooseColor: "Odaberite boju (Bijeli igrač uvijek igra prvi):",
-    white: "Bijele",
-    black: "Crne",
-    turn: "Na potezu:",
-    whiteLabel: "Bijeli",
-    blackLabel: "Crni",
-    alertRemove: "⚠️ IZABERITE PROTIVNIČKU FIGURU ZA IZBACIVANJE!",
-    millAlert: "Ne možete izbaciti figuru iz Mlina osim ako protivnik nema slobodnih figura!",
-    gameOverWinner: "🎉 Pobjednik je"
-  },
-  en: {
-    menuTitle: "NINE MEN'S MORRIS / MILLS",
-    playOffline: "👥 2 Players (Local)",
-    playAI: "🤖 Play Against Computer (AI)",
-    playOnline: "🌐 Play Online (Coming Soon)",
-    profile: "👤 Profile",
-    ranking: "🏆 Ranking",
-    leaderboard: "🥇 Top 100 Leaderboard",
-    scoring: "📊 Scoring System",
-    settings: "⚙️ Settings",
-    back: "⬅️ Back",
-    btnQuit: "🚪 Main Menu",
-    soundEffects: "Sound Effects",
-    on: "ON",
-    off: "OFF",
-    tabStats: "Stats",
-    tabBadges: "Achievements",
-    tabHistory: "Match History",
-    editAvatarTitle: "Select Avatar or Upload Image",
-    uploadCustom: "📷 Upload custom image from device",
-    rankClass: "Rank Class",
-    totalPoints: "Points",
-    winRate: "Win Rate",
-    matches: "Wins / Losses",
-    titleLabel: "Title",
-    defaultTitle: "Rookie",
-    win: "Victory",
-    loss: "Defeat",
-    scoringTitle: "Scoring Rules",
-    rankingTitle: "Rank Hierarchy",
-    ptsRequired: "points",
-    aiDifficultyTitle: "Select AI Difficulty",
-    easy: "🟢 Easy",
-    medium: "🟡 Medium",
-    hard: "🔴 Hard",
-    titleNames: "Enter Player Names",
-    p1Label: "Player 1 (Max 12 chars):",
-    p2Label: "Player 2 (Max 12 chars):",
-    btnNextCoin: "Continue to Coin Toss",
-    titleCoin: "Coin Toss",
-    coinPrompt: "chooses the coin side:",
-    heads: "HEADS",
-    tails: "TAILS",
-    resultTitle: "Result is",
-    winnerIs: "Coin toss winner is",
-    chooseColor: "Choose color (White player always moves first):",
-    white: "White",
-    black: "Black",
-    turn: "Turn:",
-    whiteLabel: "White",
-    blackLabel: "Black",
-    alertRemove: "⚠️ SELECT AN OPPONENT'S PIECE TO REMOVE!",
-    millAlert: "You cannot remove a piece from a Mill unless the opponent has no other free pieces!",
-    gameOverWinner: "🎉 Winner is"
-  }
 };
 
 const playAudioEffect = (type, soundEnabled = true) => {
@@ -268,7 +157,9 @@ const loadSyncedProfile = () => {
             ...userProf,
             id: userProf.id || match.id,
             achievements: mergedAchs,
-            unlockedAvatars: mergedAvatars
+            unlockedAvatars: mergedAvatars,
+            wins: Number(match.wins ?? userProf.wins ?? 0),
+            losses: Number(match.losses ?? userProf.losses ?? 0)
           };
         }
       }
@@ -430,10 +321,9 @@ export default function App() {
   });
 
   const [activeBoardTheme, setActiveBoardTheme] = useState(() => {
-    const liveProf = loadSyncedProfile();
     const boardsList = getStoredBoards();
     const activeBoardId = profile?.activeBoard || 'classic-blue-gold';
-    const activeTheme = boardsList.find(b => b.id === activeBoardId) || boardsList[0];
+    return boardsList.find(b => b.id === activeBoardId) || boardsList[0];
   });
 
   const [board, setBoard] = useState(Array(24).fill(null));
@@ -461,27 +351,8 @@ export default function App() {
     { id: 'rule-prot', icon: '🛡️', title: 'Zaštita', value: 'Bodovi ne mogu pasti ispod 0' }
   ];
 
-  // FUNKCIJE SORTIRANJA i PAGINACIJE
-  const [sortBy, setSortBy] = useState('newest'); // 'newest', 'oldest', 'wins', 'losses'
+  const [sortBy, setSortBy] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5; // Prikazivat ćemo 5 mečeva po stranici
-
-  // Pretpostavimo da je tvoja lista mečeva u varijabli profile.matchHistory ili history
-  const history = profile?.matchHistory || [];
-
-  // 1. SORTIRANJE
-  const sortedHistory = [...history].sort((a, b) => {
-    if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
-    if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
-    if (sortBy === 'wins') return (b.won ? 1 : 0) - (a.won ? 1 : 0);
-    if (sortBy === 'losses') return (a.won ? 0 : 1) - (b.won ? 0 : 1);
-    return 0;
-  });
-
-  // 2. PAGINACIJA
-  const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
 
   const [activeScoringRules, setActiveScoringRules] = useState(() => {
     const saved = localStorage.getItem('mlin_scoring_rules');
@@ -489,7 +360,7 @@ export default function App() {
   });
 
   const handleExportProfilePDF = () => {
-    exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog));
+    exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog), lang);
   };
 
   useEffect(() => {
@@ -713,8 +584,8 @@ export default function App() {
         ...prev,
         name: p1Data.name,
         points: p1Data.rankPoints || prev.points || 0,
-        wins: p1Data.wins || prev.wins || 0,
-        losses: p1Data.losses || prev.losses || 0
+        wins: Number(p1Data.wins || prev.wins || 0),
+        losses: Number(p1Data.losses || prev.losses || 0)
       }));
     }
     if (!isAIMode && p2Name) {
@@ -723,7 +594,7 @@ export default function App() {
     setSetupStep('COIN_TOSS');
   };
 
-const triggerCoinFlip = (choice) => {
+  const triggerCoinFlip = (choice) => {
     if (isFlipping) return;
     setIsFlipping(true);
     playAudioEffect('coinSpin', soundEnabled);
@@ -741,20 +612,19 @@ const triggerCoinFlip = (choice) => {
 
       setCoinResultText(isHeads ? t.heads : t.tails);
       setCoinWinner(winnerId);
+      window.__lastCoinTossWon = isWinnerP1;
 
-      // --- PROVJERAVA I OTKLJUČAVA POSTIGNUĆA ZA NOVČIĆ ---
       if (isWinnerP1) {
         window.__coinLossStreak = 0;
         const updatedWithCoin = evaluateGameAchievements(profile, { coinTossWon: true });
-        setProfile(updatedWithCoin);
+        updateProfileAndSave(updatedWithCoin);
       } else {
         window.__coinLossStreak = (window.__coinLossStreak || 0) + 1;
         if (window.__coinLossStreak >= 3) {
           const updatedWithBadLuck = evaluateGameAchievements(profile, { coinTossLossStreak: window.__coinLossStreak });
-          setProfile(updatedWithBadLuck);
+          updateProfileAndSave(updatedWithBadLuck);
         }
       }
-      // ----------------------------------------------------
 
       if (isAIMode && winnerId === 2) {
         setPlayers({
@@ -791,7 +661,8 @@ const triggerCoinFlip = (choice) => {
 
   const getPiecesCount = (color) => board.filter(cell => cell === color).length;
 
-  const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI) => {
+  const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI, lang = 'hr') => {
+    const t = TRANSLATIONS[lang]; // Dohvati lokalizirane prijevode za taj jezik
     const defaultAvs = getDefaultUnlockedAvatarIds();
     const prevAchs = (Array.isArray(baseProf.achievements) ? baseProf.achievements : []).map(id => String(id).trim());
     const prevAvs = Array.from(new Set([...defaultAvs, ...(Array.isArray(baseProf.unlockedAvatars) ? baseProf.unlockedAvatars : [])]));
@@ -810,8 +681,8 @@ const triggerCoinFlip = (choice) => {
     const updatedBase = {
       ...baseProf,
       points: pointsAfterMatchRules,
-      wins: isWin ? (baseProf.wins || 0) + 1 : (baseProf.wins || 0),
-      losses: !isWin ? (baseProf.losses || 0) + 1 : (baseProf.losses || 0),
+      wins: isWin ? Number(baseProf.wins || 0) + 1 : Number(baseProf.wins || 0),
+      losses: !isWin ? Number(baseProf.losses || 0) + 1 : Number(baseProf.losses || 0),
       achievements: prevAchs,
       unlockedAvatars: prevAvs
     };
@@ -822,7 +693,7 @@ const triggerCoinFlip = (choice) => {
 
     const afterAchs = evaluateGameAchievements(updatedBase, {
       isWin,
-      playerColor, // <-- OVO JE FALILO (sada rade Bijela snaga i Crna magija!)
+      playerColor,
       isAIMode: isVsAI,
       aiDifficulty: isVsAI ? aiDifficulty : 'MEDIUM',
       millsFormed: millsCount?.[playerColor] ?? (isWin ? 1 : 0),
@@ -832,11 +703,10 @@ const triggerCoinFlip = (choice) => {
       opponentPiecesLost: myCaptured,
       playerPiecesRemaining: 9 - enemyCaptured,
       opponentPiecesRemaining: 9 - myCaptured,
-      // Ako protivnik ima više od 2 figure na kraju, znači da je partija završila blokadom!
       wonByBlock: isWin && (9 - myCaptured) > 2,
       lostByBlock: !isWin && (9 - enemyCaptured) > 2,
       totalTurns: turnCount || 30,
-      coinTossWon: Boolean(window.__lastCoinTossWon) // <-- Za "Sreća na novčiću"
+      coinTossWon: Boolean(window.__lastCoinTossWon)
     });
 
     const fullAchCat = loadFullAchievementsCatalog(achievementsCatalog);
@@ -847,7 +717,7 @@ const triggerCoinFlip = (choice) => {
     const finalTotalPoints = pointsAfterMatchRules + achievementBonusPoints;
 
     const totalPointChange = finalTotalPoints - (baseProf.points || 0);
-    const scoreString = totalPointChange >= 0 ? `+${totalPointChange}` : `${totalPointChange}`;
+    const scoreString = (totalPointChange >= 0 ? `+${totalPointChange}` : `${totalPointChange}`) + ` ${t.ptsUnit}`;
 
     const newMatch = {
       player: baseProf.name,
@@ -861,7 +731,7 @@ const triggerCoinFlip = (choice) => {
     const profWithAchPoints = {
       ...afterAchs,
       points: finalTotalPoints,
-      matchHistory: [newMatch, ...(baseProf.matchHistory || []).slice(0, 9)]
+      matchHistory: [newMatch, ...(baseProf.matchHistory || []).slice(0, 19)]
     };
 
     const finalProf = evaluateGameAvatars(profWithAchPoints);
@@ -905,7 +775,7 @@ const triggerCoinFlip = (choice) => {
     playAudioEffect(isP1Winner ? 'victory' : 'defeat', soundEnabled);
 
     const p1BaseProfile = { ...loadSyncedProfile(), name: p1Name || profile.name };
-    const p1Result = computePlayerExperience(p1BaseProfile, isP1Winner, p1ColorActual, p2Name, isAIMode);
+    const p1Result = computePlayerExperience(p1BaseProfile, isP1Winner, p1ColorActual, p2Name, isAIMode, lang);
     updateProfileAndSave(p1Result.updatedProfile);
     saveMatchHistory(p1Result.newMatch);
 
@@ -936,7 +806,7 @@ const triggerCoinFlip = (choice) => {
       };
 
       const isP2Winner = winningColor === p2ColorActual;
-      const p2Result = computePlayerExperience(p2BaseProfile, isP2Winner, p2ColorActual, p1Name, false);
+      const p2Result = computePlayerExperience(p2BaseProfile, isP2Winner, p2ColorActual, p1Name, false, lang);
       p2SummaryData = p2Result.summary;
 
       try {
@@ -1136,71 +1006,21 @@ const triggerCoinFlip = (choice) => {
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px', backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000' }}>
-            {pData.isWin ? 'POBJEDA' : 'PORAZ'}
+            {pData.isWin ? (lang === 'hr' ? 'POBJEDA' : 'VICTORY') : (lang === 'hr' ? 'PORAZ' : 'DEFEAT')}
           </div>
         </div>
 
         <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 'bold' }}>Ukupno iz ovog meča:</span>
+            <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 'bold' }}>{lang === 'hr' ? 'Ukupno iz ovog meča:' : 'Total from this match:'}</span>
             <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: isPositive ? '#4ade80' : '#f87171' }}>
-              {isPositive ? `+${pData.totalPointChange}` : pData.totalPointChange} B
+              {isPositive ? `+${pData.totalPointChange}` : pData.totalPointChange} {t.ptsUnit}
             </span>
           </div>
-          <div style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
-            <span>Meč: <strong>{pData.baseDelta >= 0 ? `+${pData.baseDelta}` : pData.baseDelta} B</strong></span>
-            {pData.millBonus > 0 && <span>• Mlinovi: <strong style={{ color: '#38bdf8' }}>+{pData.millBonus} B</strong></span>}
-            {pData.domBonus > 0 && <span>• Dominacija: <strong style={{ color: '#f59e0b' }}>+{pData.domBonus} B</strong></span>}
-            {pData.achievementBonusPoints > 0 && <span>• Postignuća: <strong style={{ color: '#fbbf24' }}>+{pData.achievementBonusPoints} B</strong></span>}
-          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: '#cbd5e1', paddingTop: '6px', borderTop: '1px solid #1e293b' }}>
-            <span>Stanje bodova: <strong>{pData.finalPoints} B</strong></span>
+            <span>{lang === 'hr' ? 'Stanje bodova:' : 'Total points:'} <strong>{pData.finalPoints} {t.ptsUnit}</strong></span>
             <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{pData.rankName}</span>
           </div>
-        </div>
-
-        <div style={{ width: '100%', marginTop: '12px', textAlign: 'left' }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fbbf24', marginBottom: '6px' }}>
-            🏅 Osvojena Postignuća ({pData.newAchievements.length})
-          </div>
-          {pData.newAchievements.length === 0 ? (
-            <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '6px 8px', backgroundColor: 'rgba(15, 23, 42, 0.4)', borderRadius: '6px' }}>
-              Nema novih postignuća u ovom meču.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
-              {pData.newAchievements.map(ach => (
-                <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', backgroundColor: 'rgba(251, 191, 36, 0.12)', border: '1px solid #fbbf24', borderRadius: '8px' }}>
-                  <span style={{ fontSize: '1.35rem' }}>{ach.icon || '🏅'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#f8fafc' }}>{ach.title || ach.name}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{ach.desc || ach.description}</div>
-                  </div>
-                  <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#fde047', whiteSpace: 'nowrap' }}>+{ach.points || 10} B</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{ width: '100%', marginTop: '10px', textAlign: 'left' }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#38bdf8', marginBottom: '6px' }}>
-            🦁 Otključani Avatari ({pData.newAvatars.length})
-          </div>
-          {pData.newAvatars.length === 0 ? (
-            <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '6px 8px', backgroundColor: 'rgba(15, 23, 42, 0.4)', borderRadius: '6px' }}>
-              Nema novih avatara u ovom meču.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
-              {pData.newAvatars.map(av => (
-                <div key={av.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', backgroundColor: 'rgba(56, 189, 248, 0.15)', border: '1px solid #38bdf8', borderRadius: '8px' }}>
-                  <span style={{ fontSize: '1.3rem' }}>{av.icon}</span>
-                  <span style={{ fontSize: '0.76rem', fontWeight: 'bold', color: '#e0f2fe' }}>{av.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -1238,7 +1058,7 @@ const triggerCoinFlip = (choice) => {
                 padding: '8px 20px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer'
               }}
             >
-              ⚙️ Admin Panel
+              {t.adminPanel}
             </button>
           </div>
           <div className="menu-grid-2col">
@@ -1258,9 +1078,8 @@ const triggerCoinFlip = (choice) => {
               setProfile(loadSyncedProfile());
               setAchievementsCatalog(loadFullAchievementsCatalog());
               setCurrentScreen('ACHIEVEMENTS');
-            }}>🏅 Postignuća</button>
+            }}>{t.achievementsMenu}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
-            <button className="btn-menu" onClick={() => navigate('/admin')}>⁉️ Dodajem poslije</button>
           </div>
         </div>
       )}
@@ -1303,7 +1122,7 @@ const triggerCoinFlip = (choice) => {
             <span className="profile-title-tag">{t.defaultTitle}</span>
 
             <input
-              className="bio-input" value={profile.bio} maxLength={40} placeholder="Upišite status poruku..."
+              className="bio-input" value={profile.bio} maxLength={40} placeholder={lang === 'hr' ? "Upišite status poruku..." : "Enter status message..."}
               onChange={(e) => updateProfileAndSave({ ...profile, bio: e.target.value })}
             />
           </div>
@@ -1317,7 +1136,7 @@ const triggerCoinFlip = (choice) => {
                 setProfileTab('BADGES');
               }}>{t.tabBadges}</button>
               <button className={`tab-btn ${profileTab === 'HISTORY' ? 'active' : ''}`} onClick={() => setProfileTab('HISTORY')}>{t.tabHistory}</button>
-              <button className={`tab-btn ${profileTab === 'BOARDS' ? 'active' : ''}`} onClick={() => setProfileTab('BOARDS')}>🎨 Ploča</button>
+              <button className={`tab-btn ${profileTab === 'BOARDS' ? 'active' : ''}`} onClick={() => setProfileTab('BOARDS')}>{t.tabBoards}</button>
             </div>
           )}
 
@@ -1356,9 +1175,9 @@ const triggerCoinFlip = (choice) => {
                           borderRadius: '6px', border: `1px solid ${board.linesColor}`
                         }} />
                         <div style={{ textAlign: 'left' }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc' }}>{board.name}</div>
+                          <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc' }}>{getLocalizedBoardName(board, lang)}</div>
                           <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
-                            {isUnlocked ? (isSelected ? '✨ Aktivna tema' : '✔ Otključano (Klikni za odabir)') : '🔒 Zaključano'}
+                            {isUnlocked ? (isSelected ? t.activeTheme : t.clickToSelect) : (lang === 'hr' ? '🔒 Zaključano' : '🔒 Locked')}
                           </div>
                         </div>
                       </div>
@@ -1388,46 +1207,47 @@ const triggerCoinFlip = (choice) => {
                 const unlockedList = userAchs.map(achId => uniqueCatalog.find(a => String(a.id).trim() === achId) || { id: achId, title: `Postignuće (${achId})`, desc: 'Ostvareno', icon: '🏅' });
 
                 if (unlockedList.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>Igrač još nema dodijeljenih postignuća.</div>;
+                  return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Igrač još nema dodijeljenih postignuća.' : 'Player has no achievements yet.'}</div>;
                 }
 
-                return unlockedList.map((ach) => (
-                  <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>
-                    <div style={{ fontSize: '1.4rem' }}>{ach.icon || '🏅'}</div>
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>{ach.title || ach.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ach.description || ach.desc}</div>
+                return unlockedList.map((rawAch) => {
+                  // OVDJE DODAJEMO POZIV FUNKCIJE ZA PREVOĐENJE
+                  const ach = getLocalizedAchievement(rawAch, lang);
+
+                  return (
+                    <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>
+                      <div style={{ fontSize: '1.4rem' }}>{ach.icon || '🏅'}</div>
+                      <div style={{ flex: 1, textAlign: 'left' }}>
+                        <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>{ach.title || ach.name}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ach.description || ach.desc}</div>
+                      </div>
                     </div>
-                  </div>
-                ));
+                  );
+                });
               })()}
             </div>
           )}
 
           {profileTab === 'HISTORY' && (
             <div>
-              {/* KONTROLE ZA SORTIRANJE (Prikazuju se samo ako ima mečeva) */}
               {profile?.matchHistory && profile.matchHistory.length > 0 && (
                 <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Sortiraj:</label>
+                  <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{t.sortBy}</label>
                   <select
                     value={sortBy}
                     onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
                     style={{ background: '#071524', color: '#fff', border: '1px solid #d4af37', padding: '4px 8px', borderRadius: '6px', fontSize: '0.85rem' }}
                   >
-                    <option value="newest">Najnovije prvo</option>
-                    <option value="oldest">Najstarije prvo</option>
-                    <option value="wins">Samo pobjede</option>
-                    <option value="losses">Samo porazi</option>
+                    <option value="newest">{t.newestFirst}</option>
+                    <option value="oldest">{t.oldestFirst}</option>
+                    <option value="wins">{t.onlyWins}</option>
+                    <option value="losses">{t.onlyLosses}</option>
                   </select>
                 </div>
               )}
 
-              {/* LOGIKA ZA SORTIRANJE I PAGINACIJU */}
               {(() => {
                 const history = profile?.matchHistory || [];
-
-                // 1. Sortiranje prema tvojim poljima (m.date i m.isWin)
                 const sortedHistory = [...history].sort((a, b) => {
                   if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
                   if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
@@ -1436,14 +1256,13 @@ const triggerCoinFlip = (choice) => {
                   return 0;
                 });
 
-                // 2. Paginacija (prikazuje po 5 stavki, automatski se širi i na 20+ mečeva)
                 const itemsPerPage = 5;
                 const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
                 const startIndex = (currentPage - 1) * itemsPerPage;
                 const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
 
                 if (history.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>Nema odigranih mečeva.</div>;
+                  return <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Nema odigranih mečeva.' : 'No matches played yet.'}</div>;
                 }
 
                 return (
@@ -1457,7 +1276,6 @@ const triggerCoinFlip = (choice) => {
                       ))}
                     </div>
 
-                    {/* Gumbi za paginaciju - pojavljuju se samo ako ima više od 5 mečeva */}
                     {totalPages > 1 && (
                       <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '12px', alignItems: 'center' }}>
                         <button
@@ -1466,20 +1284,18 @@ const triggerCoinFlip = (choice) => {
                           className="tab-btn"
                           style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === 1 ? 0.4 : 1 }}
                         >
-                          Prethodna
+                          {t.prevPage}
                         </button>
-
                         <span style={{ fontSize: '0.8rem', color: '#fce055', fontWeight: 'bold' }}>
                           {currentPage} / {totalPages}
                         </span>
-
                         <button
                           onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                           disabled={currentPage === totalPages}
                           className="tab-btn"
                           style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === totalPages ? 0.4 : 1 }}
                         >
-                          Sljedeća
+                          {t.nextPage}
                         </button>
                       </div>
                     )}
@@ -1493,7 +1309,7 @@ const triggerCoinFlip = (choice) => {
             <div>
               <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>{t.uploadCustom}</button>
               <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>
-                {t.editAvatarTitle} — Otključano: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
+                {t.editAvatarTitle} — {t.unlocked}: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
               </p>
               <div className="avatar-grid" style={{ maxHeight: '240px', overflowY: 'auto', paddingRight: '6px' }}>
                 {getStoredAvatars().map((avItem) => {
@@ -1538,9 +1354,8 @@ const triggerCoinFlip = (choice) => {
                 padding: '10px 14px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
               }}
-              title="Ispis statistike, postignuća i povijesti mečeva u PDF"
             >
-              📄 Izvezi u PDF
+              {t.exportPDF}
             </button>
           </div>
         </div>
@@ -1568,18 +1383,18 @@ const triggerCoinFlip = (choice) => {
           <h2 className="menu-title">{t.leaderboard}</h2>
           <table className="leaderboard-table">
             <thead>
-              <tr><th>#</th><th>Igrač</th><th>Bodovi</th></tr>
+              <tr><th>#</th><th>{lang === 'hr' ? 'Igrač' : 'Player'}</th><th>{lang === 'hr' ? 'Bodovi' : 'Points'}</th></tr>
             </thead>
             <tbody>
               {leaderboard.length === 0 ? (
-                <tr><td colSpan="3" style={{ textAlign: 'center', padding: '12px', color: '#94a3b8' }}>Učitavanje ljestvice...</td></tr>
+                <tr><td colSpan="3" style={{ textAlign: 'center', padding: '12px', color: '#94a3b8' }}>{lang === 'hr' ? 'Učitavanje ljestvice...' : 'Loading leaderboard...'}</td></tr>
               ) : (
                 leaderboard.map((entry, idx) => {
                   const isCurrent = entry.name === profile.name;
                   return (
                     <tr key={entry.name || idx} className={isCurrent ? 'highlight-row' : ''}>
                       <td>{idx + 1}</td>
-                      <td>{entry.name}{isCurrent ? ' (Vi)' : ''}</td>
+                      <td>{entry.name}{isCurrent ? (lang === 'hr' ? ' (Vi)' : ' (You)') : ''}</td>
                       <td>{entry.rankPoints || 0}</td>
                     </tr>
                   );
@@ -1596,7 +1411,7 @@ const triggerCoinFlip = (choice) => {
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.scoringTitle}</h2>
           <div className="info-box" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
-            {activeScoringRules.map((rule) => (
+            {t.scoringRulesList.map((rule) => (
               <div key={rule.id} className="info-item" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '1.1rem' }}>{rule.icon}</span>
                 <span style={{ fontWeight: 'bold' }}>{rule.title}:</span>
@@ -1635,17 +1450,17 @@ const triggerCoinFlip = (choice) => {
             return (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h2 className="menu-title" style={{ margin: 0 }}>🏅 Postignuća</h2>
+                  <h2 className="menu-title" style={{ margin: 0 }}>{t.achievementsMenu}</h2>
                   <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
-                    Otključano: {userAchs.length} / {fullCat.length}
+                    {t.unlocked}: {userAchs.length} / {fullCat.length}
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
                   {[
-                    { id: 'ALL', label: 'Sve' },
-                    { id: 'UNLOCKED', label: 'Otključana' },
-                    { id: 'LOCKED', label: 'Zaključana' }
+                    { id: 'ALL', label: t.all },
+                    { id: 'UNLOCKED', label: t.unlocked },
+                    { id: 'LOCKED', label: t.locked }
                   ].map(f => (
                     <button
                       key={f.id} type="button" onClick={() => setAchievementFilter(f.id)}
@@ -1662,15 +1477,18 @@ const triggerCoinFlip = (choice) => {
 
                 <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                   {fullCat
-                    .filter(ach => {
-                      const isUnlocked = userAchs.includes(String(ach.id).trim());
+                    .filter(rawAch => {
+                      const isUnlocked = userAchs.includes(String(rawAch.id).trim());
                       if (achievementFilter === 'UNLOCKED') return isUnlocked;
                       if (achievementFilter === 'LOCKED') return !isUnlocked;
                       return true;
                     })
-                    .map((ach) => {
+                    .map((rawAch) => {
+                      // OVDJE POZIVAMO FUNKCIJU ZA PREVOĐENJE POSTIGNUĆA
+                      const ach = getLocalizedAchievement(rawAch, lang);
+
                       const isUnlocked = userAchs.includes(String(ach.id).trim());
-                      const defaultTier = { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
+                      const defaultTier = { label: lang === 'hr' ? 'Bronca' : 'Bronze', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' };
                       const tierInfo = (ACHIEVEMENT_TIERS && ACHIEVEMENT_TIERS[ach.tier]) ? ACHIEVEMENT_TIERS[ach.tier] : defaultTier;
 
                       return (
@@ -1691,9 +1509,9 @@ const triggerCoinFlip = (choice) => {
                             <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc || ach.description}</div>
                           </div>
                           <div style={{ textAlign: 'right', minWidth: '70px' }}>
-                            <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>+{ach.points || 10} B</div>
+                            <div style={{ color: '#fbbf24', fontSize: '0.8rem', fontWeight: 'bold' }}>+{ach.points || 10} {t.ptsUnit}</div>
                             <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-                              {isUnlocked ? <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ Osvojeno</span> : <span style={{ color: '#64748b' }}>🔒 Zaključano</span>}
+                              {isUnlocked ? <span style={{ color: '#4ade80', fontWeight: 'bold' }}>✓ {lang === 'hr' ? 'Osvojeno' : 'Unlocked'}</span> : <span style={{ color: '#64748b' }}>🔒 {lang === 'hr' ? 'Zaključano' : 'Locked'}</span>}
                             </div>
                           </div>
                         </div>
@@ -1703,7 +1521,7 @@ const triggerCoinFlip = (choice) => {
               </>
             );
           })()}
-          <button type="button" className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')} style={{ marginTop: '14px' }}>{t?.back || 'Natrag'}</button>
+          <button type="button" className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')} style={{ marginTop: '14px' }}>{t.back}</button>
         </div>
       )}
 
@@ -1728,7 +1546,7 @@ const triggerCoinFlip = (choice) => {
                     <div className="game-mode-selector">
                       <div className="mode-toggle-group">
                         <button type="button" className={`mode-btn ${gameCategory === 'CASUAL' ? 'active' : ''}`} onClick={() => setGameCategory('CASUAL')}>☕ Casual</button>
-                        <button type="button" className={`mode-btn ${gameCategory === 'COMPETITIVE' ? 'active' : ''}`} onClick={() => setGameCategory('COMPETITIVE')}>⚡ Natjecateljski</button>
+                        <button type="button" className={`mode-btn ${gameCategory === 'COMPETITIVE' ? 'active' : ''}`} onClick={() => setGameCategory('COMPETITIVE')}>⚡ {lang === 'hr' ? 'Natjecateljski' : 'Competitive'}</button>
                       </div>
 
                       {gameCategory === 'COMPETITIVE' && (
@@ -1839,7 +1657,7 @@ const triggerCoinFlip = (choice) => {
                 <Board
                   board={board} selectedNode={currentActiveNode} validMoves={validMoves} removableNodes={removableNodes} mustRemove={mustRemove}
                   turn={turn} isAIMode={onlineGameId ? false : isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
-                  theme={activeBoardTheme} // <-- OVDJE PROSLJEĐUJEMO TEMU PLOČE
+                  theme={activeBoardTheme}
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
                     if (onlineGameId && turn !== myColor) return;
@@ -1892,26 +1710,26 @@ const triggerCoinFlip = (choice) => {
               {winner && matchSummary && (
                 <div onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(6, 11, 22, 0.88)', backdropFilter: 'blur(6px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200, padding: '16px' }}>
                   <div style={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '18px', padding: '24px 28px', width: '100%', maxWidth: '820px', boxShadow: '0 24px 60px rgba(0,0,0,0.85)', color: '#f8fafc', textAlign: 'center', maxHeight: '92vh', overflowY: 'auto' }}>
-                    <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>⚡ Sažetak Meča i Osvojenih Nagrada</div>
-                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>🏆 Pobjednik: <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span></h2>
+                    <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>{lang === 'hr' ? '⚡ Sažetak Meča i Osvojenih Nagrada' : '⚡ Match Summary & Rewards'}</div>
+                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>🏆 {lang === 'hr' ? 'Pobjednik:' : 'Winner:'} <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span></h2>
 
                     <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: '20px', marginBottom: '22px', flexWrap: 'wrap' }}>
-                      {renderPlayerExperienceColumn(matchSummary.leftPlayer, 'Igrač 1')}
+                      {renderPlayerExperienceColumn(matchSummary.leftPlayer, lang === 'hr' ? 'Igrač 1' : 'Player 1')}
                       <div style={{ width: '2px', background: 'linear-gradient(180deg, transparent 0%, #fbbf24 20%, #38bdf8 80%, transparent 100%)', borderRadius: '2px', alignSelf: 'stretch', minHeight: '280px', boxShadow: '0 0 12px rgba(251, 191, 36, 0.45)' }} />
                       {!matchSummary.isAIMode && matchSummary.rightPlayer ? (
-                        renderPlayerExperienceColumn(matchSummary.rightPlayer, 'Igrač 2')
+                        renderPlayerExperienceColumn(matchSummary.rightPlayer, lang === 'hr' ? 'Igrač 2' : 'Player 2')
                       ) : (
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', border: '1px dashed #334155', minWidth: '240px', color: '#94a3b8' }}>
                           <div style={{ fontSize: '3.2rem', marginBottom: '10px' }}>🤖</div>
-                          <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#e2e8f0' }}>Računalo ({matchSummary.aiDifficulty})</div>
-                          <p style={{ fontSize: '0.8rem', marginTop: '8px', maxWidth: '220px', lineHeight: '1.4' }}>AI protivnik ne skuplja bodove ni rangove.</p>
+                          <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#e2e8f0' }}>Computer ({matchSummary.aiDifficulty})</div>
+                          <p style={{ fontSize: '0.8rem', marginTop: '8px', maxWidth: '220px', lineHeight: '1.4' }}>{lang === 'hr' ? 'AI protivnik ne skuplja bodove ni rangove.' : 'AI opponent does not collect points or ranks.'}</p>
                         </div>
                       )}
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                      <button type="button" onClick={() => { if (isAIMode) startAIGame(aiDifficulty); else startCouchGame(); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🔄 Igraj ponovno</button>
-                      <button type="button" onClick={() => { setWinner(null); setMatchSummary(null); setCurrentScreen('MAIN_MENU'); }} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🏠 Glavni izbornik</button>
+                      <button type="button" onClick={() => { if (isAIMode) startAIGame(aiDifficulty); else startCouchGame(); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🔄 {lang === 'hr' ? 'Igraj ponovno' : 'Play Again'}</button>
+                      <button type="button" onClick={() => { setWinner(null); setMatchSummary(null); setCurrentScreen('MAIN_MENU'); }} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🏠 {lang === 'hr' ? 'Glavni izbornik' : 'Main Menu'}</button>
                     </div>
                   </div>
                 </div>
