@@ -1109,7 +1109,12 @@ export default function AdminPanel() {
                       )}
 
                       <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontSize: '2.2rem', lineHeight: 1 }}>{p.avatar}</span>
+                        {p.avatar && p.avatar.length>2 ? (
+                          <img style={{width: '100%'}} src={p.avatar} />
+                        ) : (
+                            <span style={{ fontSize: '2.2rem', lineHeight: 1 }}>{p.avatar}</span>
+                        )}
+                        
                       </div>
 
                       <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>

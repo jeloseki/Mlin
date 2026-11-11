@@ -52,6 +52,7 @@ const TRANSLATIONS = {
     playOnline: "🌐 Igraj Na Mreži (Uskoro)",
     profile: "👤 Profil",
     ranking: "🏆 Rangovi",
+    achievements: "🏅 Postignuća",
     leaderboard: "🥇 Ljestvica Prvih 100",
     scoring: "📊 Bodovanje",
     settings: "⚙️ Postavke",
@@ -107,6 +108,7 @@ const TRANSLATIONS = {
     playOnline: "🌐 Play Online (Coming Soon)",
     profile: "👤 Profile",
     ranking: "🏆 Ranking",
+    achievements: "🏅 Achievements",
     leaderboard: "🥇 Top 100 Leaderboard",
     scoring: "📊 Scoring System",
     settings: "⚙️ Settings",
@@ -1258,7 +1260,7 @@ const triggerCoinFlip = (choice) => {
               setProfile(loadSyncedProfile());
               setAchievementsCatalog(loadFullAchievementsCatalog());
               setCurrentScreen('ACHIEVEMENTS');
-            }}>🏅 Postignuća</button>
+            }}>{t.achievements}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
             <button className="btn-menu" onClick={() => navigate('/admin')}>⁉️ Dodajem poslije</button>
           </div>
@@ -1635,7 +1637,7 @@ const triggerCoinFlip = (choice) => {
             return (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h2 className="menu-title" style={{ margin: 0 }}>🏅 Postignuća</h2>
+                  <h2 className="menu-title" style={{ margin: 0 }}>{t.achievements}</h2>
                   <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
                     Otključano: {userAchs.length} / {fullCat.length}
                   </div>
