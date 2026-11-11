@@ -1,6 +1,7 @@
 // src/utils/pdfExport.js
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
+import { getStoredBoards } from '../boardsData';
 
 const RANK_STEPS = [
   { min: 0, hr: 'Bronca III' },
@@ -24,7 +25,7 @@ const RANK_STEPS = [
 
 const getRankName = (points) => {
   let rank = RANK_STEPS[0];
-  for (let r of RANK_STEPS) {
+  for (const r of RANK_STEPS) {
     if (points >= r.min) rank = r;
     else break;
   }
@@ -169,7 +170,52 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = []) => {
       currentY = 20;
     }
 
-    // --- 3. TABLICA: POVIJEST MEČEVA ---
+    // --- 3. TABLICA: OTKLJUČANE PLOČE (isti format kao ostale tablice) ---
+    doc.setFont('Roboto', 'bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(...textMain);
+    doc.text('Otključane Ploče', 15, currentY);
+    currentY += 4;
+
+    let boardsCatalog = [];
+    try { boardsCatalog = getStoredBoards(); } catch (e) { boardsCatalog = []; }
+    const unlockedBoardIds = Array.isArray(profile.unlockedBoards)
+      ? profile.unlockedBoards.map(id => String(id).trim())
+      : [];
+    const activeBoardId = String(profile.activeBoard || '').trim();
+    const boardsData = boardsCatalog
+      .filter(b => b.price === 0 || b.isDefault || unlockedBoardIds.includes(String(b.id).trim()))
+      .map((b, idx) => [
+        (idx + 1).toString(),
+        b.name || b.id,
+        Number(b.price) === 0 ? 'Uključena' : `+${b.price} B`,
+        activeBoardId === String(b.id).trim() ? 'AKTIVNA' : 'Dostupna'
+      ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      margin: { left: 15, right: 15 },
+      head: [['#', 'Ploča', 'Vrijednost', 'Status']],
+      body: boardsData.length > 0 ? boardsData : [['-', 'Nema otključanih ploča.', '-', '-']],
+      styles: { font: 'Roboto', fontSize: 9, textColor: textMain, cellPadding: 3.5 },
+      headStyles: { fillColor: brandDark, fontStyle: 'bold', textColor: [255, 255, 255] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 90, fontStyle: 'bold' },
+        2: { cellWidth: 35, halign: 'center' },
+        3: { cellWidth: 43, halign: 'center' }
+      }
+    });
+
+    currentY = doc.lastAutoTable.finalY + 12;
+
+    if (currentY > 220) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    // --- 4. TABLICA: POVIJEST MEČEVA ---
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(...textMain);

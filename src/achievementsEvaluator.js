@@ -185,12 +185,19 @@ export const evaluateGameAchievements = (currentProfile, ctx = {}) => {
     { id: 'ach_085', cond: isLoss && (opponentPiecesLost === 0 || opponentPiecesRemaining === 9) },
     { id: 'ach_086', cond: isLoss && Number(ctx.piecesLostInPlacement || 0) >= 3 },
     { id: 'ach_087', cond: isLoss && reachedFlying && totalTurns <= 24 },
+    { id: 'ach_088', cond: isLoss && Boolean(ctx.giftedMill) },
+    { id: 'ach_089', cond: isLoss && Boolean(ctx.selfBlocked) },
+    { id: 'ach_090', cond: isLoss && Number(ctx.timeUsedFirst5Ratio || 0) > 0.8 },
     { id: 'ach_091', cond: isLoss && playerPiecesRemaining >= opponentPiecesRemaining + 2 },
     { id: 'ach_092', cond: isLoss && totalTurns < 20 },
     { id: 'ach_093', cond: isLoss && Boolean(ctx.lostByBlock) && playerPiecesRemaining >= 5 },
     { id: 'ach_094', cond: losses >= 25 },
+    { id: 'ach_095', cond: isMatchEnd && Boolean(ctx.neverMovedCorner) },
+    { id: 'ach_096', cond: isMatchEnd && Boolean(ctx.missedMillOpportunity) },
     { id: 'ach_097', cond: isLoss && coinTossWon && isWhite && totalTurns < 25 },
-    { id: 'ach_098', cond: lossStreak >= 7 }
+    { id: 'ach_098', cond: lossStreak >= 7 },
+    { id: 'ach_099', cond: isLoss && millsFormed >= 1 && playerPiecesRemaining >= 5 },
+    { id: 'ach_100', cond: isLoss && Boolean(ctx.isTournament) && Boolean(ctx.lastPlace) }
   ];
 
   const catalog = getStoredAchievements();
@@ -206,7 +213,7 @@ export const evaluateGameAchievements = (currentProfile, ctx = {}) => {
       if (achMeta && Number(achMeta.points) > 0) {
         newlyEarnedPoints += Number(achMeta.points);
       }
-      console.log(`🏅 Otključano postignuće: ${rule.id} (${achMeta?.title || ''})`);
+      // console.log(`🏅 Otključano postignuće: ${rule.id} (${achMeta?.title || ''})`);
     }
   });
 

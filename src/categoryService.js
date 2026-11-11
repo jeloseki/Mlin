@@ -11,18 +11,18 @@ import { db } from './firebase';
 
 const CATEGORIES_COLLECTION = 'game_categories';
 
-// 1. Dohvaćanje svih kategorija (1)
+// 1. Fetching all categories (1)
 export const getCategories = async () => {
   try {
     const snap = await getDocs(collection(db, CATEGORIES_COLLECTION));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (error) {
-    console.error("Greška pri dohvaćanju kategorija:", error);
+    console.error("Error fetching categories:", error);
     return [];
   }
 };
 
-// 2. Dodavanje nove kategorije (1)
+// 2. Adding a new category (1)
 export const addCategory = async ({ name, description = '' }) => {
   try {
     return await addDoc(collection(db, CATEGORIES_COLLECTION), {
@@ -31,20 +31,20 @@ export const addCategory = async ({ name, description = '' }) => {
       createdAt: Date.now()
     });
   } catch (error) {
-    console.error("Greška pri dodavanju kategorije:", error);
+    console.error("Error adding category:", error);
   }
 };
 
-// 3. Brisanje kategorije
+// 3. Deleting a category
 export const deleteCategory = async (categoryId) => {
   try {
     return await deleteDoc(doc(db, CATEGORIES_COLLECTION, categoryId));
   } catch (error) {
-    console.error("Greška pri brisanju kategorije:", error);
+    console.error("Error deleting category:", error);
   }
 };
 
-// 4. Dohvaćanje stavki unutar odabrane kategorije (N)
+// 4. Fetching items within the selected category (N)
 export const getItemsByCategory = async (categoryId) => {
   if (!categoryId) return [];
   try {
@@ -52,12 +52,12 @@ export const getItemsByCategory = async (categoryId) => {
     const snap = await getDocs(itemsRef);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (error) {
-    console.error("Greška pri dohvaćanju stavki kategorije:", error);
+    console.error("Error fetching category items:", error);
     return [];
   }
 };
 
-// 5. Dodavanje stavke u odabranu kategoriju (N)
+// 5. Adding an item to the selected category (N)
 export const addItemToCategory = async (categoryId, itemData) => {
   try {
     const itemsRef = collection(db, CATEGORIES_COLLECTION, categoryId, 'items');
@@ -66,46 +66,46 @@ export const addItemToCategory = async (categoryId, itemData) => {
       createdAt: Date.now()
     });
   } catch (error) {
-    console.error("Greška pri dodavanju stavke:", error);
+    console.error("Error adding item:", error);
   }
 };
 
-// 6. Brisanje pojedinačne stavke iz kategorije
+// 6. Deleting a single item from a category
 export const deleteItem = async (categoryId, itemId) => {
   try {
     return await deleteDoc(doc(db, CATEGORIES_COLLECTION, categoryId, 'items', itemId));
   } catch (error) {
-    console.error("Greška pri brisanju stavke:", error);
+    console.error("Error deleting item:", error);
   }
 };
 
-// 7. Inicijalizacija zadanih kategorija i podstavki (Seed 1:N podataka)
+// 7. Initializing default categories and sub-items (Seed 1:N data)
 export const seedDefaultCategories = async () => {
   const defaultData = [
     {
-      name: 'Vremenski Modovi',
-      description: 'Format trajanja poteza i partije',
+      name: 'Time Modes',
+      description: 'Move and game duration format',
       items: [
         { label: 'Classic standard', value: '300s' },
-        { label: 'Rapid meč', value: '120s' },
-        { label: 'Blitz turnir', value: '45s' }
+        { label: 'Rapid match', value: '120s' },
+        { label: 'Blitz tournament', value: '45s' }
       ]
     },
     {
-      name: 'Postignuća (Bedževi)',
-      description: 'Zadaci i izazovi za igrače',
+      name: 'Achievements (Badges)',
+      description: 'Tasks and challenges for players',
       items: [
-        { label: 'Prvi Mlin', value: 'Složi 1 mlin u meču' },
-        { label: 'Dvostruka Zamka', value: 'Otvori i zatvori 2 mlina' },
-        { label: 'Kralj Ploče', value: 'Pobijedi s 7+ preostalih figura' }
+        { label: 'First Mill', value: 'Build 1 mill in a match' },
+        { label: 'Double Trap', value: 'Open and close 2 mills' },
+        { label: 'King of the Board', value: 'Win with 7+ remaining pieces' }
       ]
     },
     {
-      name: 'Kozmetički Paketi',
-      description: 'Tematske skupine avatara i ikona',
+      name: 'Cosmetic Packs',
+      description: 'Themed groups of avatars and icons',
       items: [
-        { label: 'Životinjsko carstvo', value: '🦁, 🦊, 🦉, 🐱' },
-        { label: 'Magični ratnici', value: '🧙‍♂️, ⚔️, 🛡️, 👑' },
+        { label: 'Animal kingdom', value: '🦁, 🦊, 🦉, 🐱' },
+        { label: 'Magic warriors', value: '🧙‍♂️, ⚔️, 🛡️, 👑' },
         { label: 'Sci-Fi / Roboti', value: '🤖, 🚀, ⚡, 👾' }
       ]
     }
@@ -128,7 +128,7 @@ export const seedDefaultCategories = async () => {
   }
 };
 
-// 8. Uređivanje postojeće kategorije
+// 8. Editing an existing category
 export const updateCategory = async (categoryId, data) => {
   try {
     const catRef = doc(db, CATEGORIES_COLLECTION, categoryId);
@@ -137,11 +137,11 @@ export const updateCategory = async (categoryId, data) => {
       updatedAt: Date.now()
     });
   } catch (error) {
-    console.error("Greška pri ažuriranju kategorije:", error);
+    console.error("Error updating category:", error);
   }
 };
 
-// 9. Uređivanje postojeće stavke
+// 9. Editing an existing item
 export const updateItem = async (categoryId, itemId, data) => {
   try {
     const itemRef = doc(db, CATEGORIES_COLLECTION, categoryId, 'items', itemId);
@@ -150,6 +150,6 @@ export const updateItem = async (categoryId, itemId, data) => {
       updatedAt: Date.now()
     });
   } catch (error) {
-    console.error("Greška pri ažuriranju stavke:", error);
+    console.error("Error updating item:", error);
   }
 };

@@ -12,10 +12,10 @@ const getPlayerNodes = (board, color) =>
 // Brojanje otvorenih konfiguracija od 2 figure s 1 praznim poljem
 const countPotentialMills = (board, player) => {
   let count = 0;
-  for (let triplet of MILL_TRIPLETS) {
+  for (const triplet of MILL_TRIPLETS) {
     let pCount = 0;
     let emptyCount = 0;
-    for (let idx of triplet) {
+    for (const idx of triplet) {
       if (board[idx] === player) pCount++;
       else if (board[idx] === null) emptyCount++;
     }
@@ -29,7 +29,7 @@ const getMobility = (board, player, isFlying) => {
   if (isFlying) return getEmptyNodes(board).length;
   let moves = 0;
   const nodes = getPlayerNodes(board, player);
-  for (let n of nodes) {
+  for (const n of nodes) {
     const adj = BOARD_CONNECTIONS[n] || [];
     moves += adj.filter((target) => board[target] === null).length;
   }
@@ -54,7 +54,7 @@ const evaluateBoard = (board, aiColor) => {
   // 2. Mlinovi
   let aiMills = 0;
   let oppMills = 0;
-  for (let t of MILL_TRIPLETS) {
+  for (const t of MILL_TRIPLETS) {
     if (t.every((i) => board[i] === aiColor)) aiMills++;
     if (t.every((i) => board[i] === oppColor)) oppMills++;
   }
@@ -69,10 +69,10 @@ const evaluateBoard = (board, aiColor) => {
   score += (aiMob - oppMob) * 6;
 
   // 5. Strateške točke s 4 veze (križanja: 1, 9, 17, 3, 11, 19, 5, 13, 21, 7, 15, 23)
-  for (let n of aiNodes) {
+  for (const n of aiNodes) {
     if ((BOARD_CONNECTIONS[n] || []).length === 4) score += 8;
   }
-  for (let n of oppNodes) {
+  for (const n of oppNodes) {
     if ((BOARD_CONNECTIONS[n] || []).length === 4) score -= 8;
   }
 
@@ -93,12 +93,8 @@ export const getAIPieceToRemove = (board, opponentColor, difficulty = 'EASY') =>
   const eligibleNodes = notInMillNodes.length > 0 ? notInMillNodes : opponentNodes;
   if (eligibleNodes.length === 1) return eligibleNodes[0];
 
-  // Lako: nasumično bira, ali izbjegava one koje ništa ne ugrožavaju
+  // Lako: nasumično bira
   if (difficulty === 'EASY') {
-    for (let node of eligibleNodes) {
-      const adjacent = BOARD_CONNECTIONS[node] || [];
-      if (adjacent.some((a) => board[a] === opponentColor)) return node;
-    }
     return eligibleNodes[Math.floor(Math.random() * eligibleNodes.length)];
   }
 
@@ -106,11 +102,11 @@ export const getAIPieceToRemove = (board, opponentColor, difficulty = 'EASY') =>
   let bestNode = eligibleNodes[0];
   let maxThreat = -Infinity;
 
-  for (let node of eligibleNodes) {
+  for (const node of eligibleNodes) {
     let threatScore = 0;
 
     // Ruši li protivničku 2-u-nizu prijetnju?
-    for (let triplet of MILL_TRIPLETS) {
+    for (const triplet of MILL_TRIPLETS) {
       if (triplet.includes(node)) {
         const others = triplet.filter((i) => i !== node);
         if (others.every((i) => board[i] === opponentColor)) {
@@ -144,7 +140,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
   const oppColor = getOpponent(aiColor);
 
   // 1. ZATVORI VLASTITI MLIN (Apsolutni prioritet za pobjednički potez)
-  for (let node of emptyNodes) {
+  for (const node of emptyNodes) {
     const simBoard = [...board];
     simBoard[node] = aiColor;
     if (checkFormsMill(simBoard, node, aiColor)) {
@@ -153,7 +149,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
   }
 
   // 2. BLOKIRAJ PROTIVNIČKI MLIN (Ako protivnik ima 2 u nizu, AI MORA stati na 3. mjesto)
-  for (let node of emptyNodes) {
+  for (const node of emptyNodes) {
     const simBoard = [...board];
     simBoard[node] = oppColor;
     if (checkFormsMill(simBoard, node, oppColor)) {
@@ -163,7 +159,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
 
   if (difficulty === 'EASY') {
     // Lako: traži polja koja stvaraju 2-u-nizu
-    for (let node of emptyNodes) {
+    for (const node of emptyNodes) {
       const tempBoard = [...board];
       tempBoard[node] = aiColor;
       if (countPotentialMills(tempBoard, aiColor) > countPotentialMills(board, aiColor)) {
@@ -177,7 +173,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
   let bestScore = -Infinity;
   let bestNode = emptyNodes[0];
 
-  for (let node of emptyNodes) {
+  for (const node of emptyNodes) {
     const tempBoard = [...board];
     tempBoard[node] = aiColor;
 
@@ -202,7 +198,7 @@ export const getAIPlacementNode = (board, aiColor, difficulty = 'EASY') => {
 
     if (difficulty === 'HARD') {
       // Izbjegavaj potez koji protivniku direktno otvara mlin u idućem koraku
-      for (let oppNode of emptyNodes) {
+      for (const oppNode of emptyNodes) {
         if (oppNode === node) continue;
         const testBoard = [...tempBoard];
         testBoard[oppNode] = oppColor;
@@ -232,11 +228,11 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
   const getAllMoves = (b, player, flying) => {
     const moves = [];
     const nodes = getPlayerNodes(b, player);
-    for (let from of nodes) {
+    for (const from of nodes) {
       const targets = flying
         ? getEmptyNodes(b)
         : (BOARD_CONNECTIONS[from] || []).filter((to) => b[to] === null);
-      for (let to of targets) {
+      for (const to of targets) {
         moves.push({ from, to });
       }
     }
@@ -247,7 +243,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
   if (legalMoves.length === 0) return null;
 
   // 1. Trenutni mlin (apsolutni prioritet za sve težine)
-  for (let move of legalMoves) {
+  for (const move of legalMoves) {
     const tempBoard = [...board];
     tempBoard[move.from] = null;
     if (checkFormsMill(tempBoard, move.to, aiColor)) {
@@ -256,7 +252,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
   }
 
   // 2. Blokiranje trenutnog protivničkog mlina
-  for (let move of legalMoves) {
+  for (const move of legalMoves) {
     const tempBoard = [...board];
     tempBoard[move.from] = null;
     if (checkFormsMill(tempBoard, move.to, oppColor)) {
@@ -266,7 +262,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
 
   if (difficulty === 'EASY') {
     // Lako: bira potez koji makar povećava mobilnost ili stvara prijetnju
-    for (let move of legalMoves) {
+    for (const move of legalMoves) {
       const tempBoard = [...board];
       tempBoard[move.from] = null;
       tempBoard[move.to] = aiColor;
@@ -291,7 +287,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
 
     if (isMaximizing) {
       let maxEval = -Infinity;
-      for (let m of moves) {
+      for (const m of moves) {
         const nextBoard = [...currentBoard];
         nextBoard[m.from] = null;
         nextBoard[m.to] = aiColor;
@@ -310,7 +306,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
       return maxEval;
     } else {
       let minEval = Infinity;
-      for (let m of moves) {
+      for (const m of moves) {
         const nextBoard = [...currentBoard];
         nextBoard[m.from] = null;
         nextBoard[m.to] = oppColor;
@@ -333,7 +329,7 @@ export const getAIMove = (board, aiColor, difficulty = 'EASY') => {
   let bestMove = legalMoves[0];
   let bestVal = -Infinity;
 
-  for (let move of legalMoves) {
+  for (const move of legalMoves) {
     const nextBoard = [...board];
     nextBoard[move.from] = null;
     nextBoard[move.to] = aiColor;

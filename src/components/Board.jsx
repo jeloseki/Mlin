@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { memo, useRef } from 'react';
 import { isPieceInMill } from '../logic/millEngine';
 
 export const NODE_POSITIONS = [
@@ -16,26 +16,39 @@ export const NODE_POSITIONS = [
   { x: 36.66, y: 63.33 }, { x: 36.66, y: 50 }
 ];
 
-export default function Board({ 
+const Board = ({ 
   board, 
   onNodeInteract,
   onNodePick,
   selectedNode, 
   validMoves = [], 
   removableNodes = [],
+  showLegalMoves = true,
   turn,
   isAIMode,
   aiColor,
   mustRemove,
   focusedNode,
   theme // Primamo temu odabrane ploče
-}) {
+}) => {
   const isAITurn = isAIMode && turn === aiColor;
   const boardRef = useRef(null);
 
   // Izvlacimo boje iz teme, s fiksnim fallbackom na zlatno-plavo ako tema fali
   const linesColor = theme?.linesColor || '#d4af37';
   const boardBgColor = theme?.boardBackground || '';
+  const fx = theme?.fx || null;
+  const neonSignShadow = (color) => `${color} 0 0 3px, ${color} 0 0 8px, ${color} 0 0 16px, ${color} 0 0 32px`;
+
+  // 3D + dubinska sjena — iz fx konfiguracije (po temi)
+  const tilt3d = fx?.tilt3d || 0;
+  const depthShadow = fx?.depthShadow || '0 24px 48px rgba(0,0,0,0.75)';
+  const wrapperStyle = {
+    ...(theme?.background ? { background: theme.background, borderColor: theme.linesColor } : {}),
+    boxShadow: depthShadow,
+    ...(tilt3d ? { '--board-tilt': `${tilt3d}deg` } : {}),
+    transition: 'transform 0.35s ease, box-shadow 0.35s ease',
+  };
 
   const findClosestNode = (clientX, clientY) => {
     if (!boardRef.current) return null;
@@ -70,11 +83,63 @@ export default function Board({
       className="board-wrapper" 
       ref={boardRef}
       onMouseUp={handleBoardMouseUp}
+      style={wrapperStyle}
     >
+      {fx && (
+        <div className="board-fx" aria-hidden="true">
+          {fx.bg && <div className="board-fx-bg" style={{ background: fx.bg }} />}
+          {fx.texture && <div className="board-fx-texture" style={{ background: fx.texture }} />}
+          {fx.sheen && (
+            <div
+              className="board-fx-sheen"
+              style={{
+                backgroundImage: `linear-gradient(115deg, transparent 32%, ${fx.sheen} 50%, transparent 68%)`,
+              }}
+            />
+          )}
+          {Array.isArray(fx.floaters?.glyphs) && Array.from({ length: fx.floaters.count }).map((_, i) => {
+            const glyph = fx.floaters.glyphs[i % fx.floaters.glyphs.length];
+            return (
+              <span
+                key={`fx-f-${i}`}
+                className={`board-fx-floater mode-${fx.floaters.mode || 'float'}`}
+                style={{
+                  left: `${(i * 53 + 7) % 94 + 3}%`,
+                  color: fx.floaters.color,
+                  animationDelay: `${(i * 0.9) % 7}s`,
+                  animationDuration: `${6 + (i % 5)}s`,
+                  fontSize: `${0.6 + (i % 4) * 0.14}rem`
+                }}
+              >
+                {glyph}
+              </span>
+            );
+          })}
+          {Array.isArray(fx.signs) && fx.signs.map((s, i) => (
+            <div
+              key={`fx-s-${i}`}
+              className="board-fx-sign"
+              style={{
+                color: '#fff',
+                left: s.left,
+                top: s.top,
+                fontSize: s.size,
+                transform: `rotate(${s.rotate || '0deg'})`,
+                textShadow: neonSignShadow(s.color)
+              }}
+            >
+              {s.text}
+            </div>
+          ))}
+        </div>
+      )}
       <svg 
         className="board-svg" 
         viewBox="0 0 100 100"
-        style={boardBgColor ? { backgroundColor: boardBgColor, borderRadius: '10px' } : {}}
+        style={{
+          ...(boardBgColor ? { backgroundColor: boardBgColor, borderRadius: '10px' } : {}),
+          ...(fx?.glowColor ? { filter: `drop-shadow(0 0 ${fx.glow || 6}px ${fx.glowColor})` } : {})
+        }}
       >
         <rect x="10" y="10" width="80" height="80" fill="none" stroke={linesColor} strokeWidth="2.5" />
         <rect x="23.33" y="23.33" width="53.33" height="53.33" fill="none" stroke={linesColor} strokeWidth="2.5" />
@@ -102,7 +167,7 @@ export default function Board({
       {NODE_POSITIONS.map((pos, idx) => {
         const piece = board[idx];
         const isSelected = selectedNode === idx;
-        const isValidTarget = validMoves.includes(idx);
+        const isValidTarget = showLegalMoves && validMoves.includes(idx);
         const isRemovable = removableNodes.includes(idx);
         const isKeyboardFocused = focusedNode === idx;
         
@@ -143,4 +208,6 @@ export default function Board({
       })}
     </div>
   );
-}
+};
+
+export default memo(Board);

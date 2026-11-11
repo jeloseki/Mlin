@@ -1,19 +1,33 @@
 // src/boardsData.js
 import { BOARD_THEMES } from './constants/boardThemes';
 
-// Dohvat svih ploča iz lokalne memorije ili fallback na konstante
+// Merge a stored board with the default values from BOARD_THEMES.
+// This way older records in localStorage (without the 'fx' field) get visual
+// effects, and new fields (glow, signs, floaters...) are not lost.
+const mergeWithDefaults = (board) => {
+  const base = BOARD_THEMES.find(t => t.id === board.id) || {};
+  return {
+    ...base,
+    ...board,
+    fx: { ...(base.fx || {}), ...(board.fx || {}) }
+  };
+};
+
+// Fetch all boards from local storage or fall back to the constants
 export const getStoredBoards = () => {
   try {
     const saved = localStorage.getItem('mlin_boards_catalog');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(mergeWithDefaults);
+      }
     }
   } catch (e) {}
   return BOARD_THEMES;
 };
 
-// Spremanje kataloga ploča
+// Saving the board catalog
 export const saveBoardsToStorage = (boards) => {
   try {
     localStorage.setItem('mlin_boards_catalog', JSON.stringify(boards));
@@ -21,13 +35,13 @@ export const saveBoardsToStorage = (boards) => {
   } catch (e) {}
 };
 
-// Provjera koje su ploče defaultne (prva ploča je uvijek otključana svima)
+// Check which boards are default (the first board is always unlocked for everyone)
 export const getDefaultUnlockedBoardIds = () => {
   const boards = getStoredBoards();
   return boards.filter(b => b.price === 0 || b.isDefault).map(b => b.id);
 };
 
-// Evaluacija profila da se osigura da igrač ima barem defaultne ploče
+// Evaluate the profile to make sure the player has at least the default boards
 export const evaluateGameBoards = (profile) => {
   const defaultIds = getDefaultUnlockedBoardIds();
   const currentUnlocked = Array.isArray(profile.unlockedBoards) ? profile.unlockedBoards : [];

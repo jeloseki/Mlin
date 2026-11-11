@@ -5,7 +5,7 @@ const NAV_MAP = {
   1: { UP: 1, DOWN: 9, LEFT: 0, RIGHT: 2 },
   2: { UP: 2, DOWN: 3, LEFT: 1, RIGHT: 2 },
   3: { UP: 2, DOWN: 4, LEFT: 11, RIGHT: 3 },
-  4: { UP: 3, DOWN: 4, LEFT: 5, RIGHT: 4 },
+  4: { UP: 3, DOWN: 4, LEFT: 5, RIGHT: 3 },
   5: { UP: 13, DOWN: 5, LEFT: 6, RIGHT: 4 },
   6: { UP: 7, DOWN: 6, LEFT: 6, RIGHT: 5 },
   7: { UP: 0, DOWN: 6, LEFT: 7, RIGHT: 15 },

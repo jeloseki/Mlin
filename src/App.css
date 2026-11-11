@@ -21,6 +21,16 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* TOUCH-FRIENDLY: ukloni kašnjenje na dodir i nespremni dvostruki zoom
+   (ploča zadržava svoj touch-action: none za vlastito povlačenje figure) */
+button,
+a,
+select,
+input {
+  touch-action: manipulation;
 }
 
 .game-container {
@@ -215,6 +225,15 @@ body {
   box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7);
   box-sizing: border-box;
   touch-action: none;
+  transform: perspective(1100px) rotateX(var(--board-tilt, 0deg));
+  transform-origin: center 62%;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  will-change: transform;
+}
+@media (hover: hover) {
+  .board-wrapper:hover {
+    transform: perspective(1100px) rotateX(var(--board-tilt, 0deg)) translateY(-3px);
+  }
 }
 
 .board-svg {
@@ -755,3 +774,267 @@ body {
   border-color: #38bdf8;
   font-weight: 600;
 }
+
+/* ============================================================
+   PLOČA FX — tematski vizualni efekti (neon, bilje, čestice)
+   ============================================================ */
+.board-fx {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+.board-fx-bg {
+  position: absolute;
+  inset: 0;
+  opacity: 0.6;
+  border-radius: 16px;
+}
+.board-fx-texture {
+  position: absolute;
+  inset: 0;
+  opacity: 0.45;
+  border-radius: 16px;
+  mix-blend-mode: soft-light;
+  background-repeat: repeat;
+  background-size: auto;
+  pointer-events: none;
+}
+.board-fx-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  pointer-events: none;
+  background-size: 300% 300%;
+  background-position: 160% 0%;
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+  animation: fx-sheen-sweep 7s ease-in-out infinite;
+  will-change: background-position;
+}
+@keyframes fx-sheen-sweep {
+  0%   { background-position: 160% 0%; opacity: 0.25; }
+  45%  { background-position: 40% 100%; opacity: 0.55; }
+  60%  { background-position: 0% 100%; opacity: 0.30; }
+  100% { background-position: 160% 0%; opacity: 0.25; }
+}
+.board-fx-sign {
+  position: absolute;
+  font-family: 'Arial Black', 'Segoe UI', sans-serif;
+  font-weight: 900;
+  letter-spacing: 3px;
+  white-space: nowrap;
+  line-height: 1;
+  text-transform: uppercase;
+  animation: fx-flicker 3.2s ease-in-out infinite;
+  will-change: opacity;
+}
+.board-fx-floater {
+  position: absolute;
+  bottom: -8%;
+  opacity: 0;
+  text-shadow: 0 0 6px currentColor;
+  will-change: transform, opacity;
+}
+.board-fx-floater.mode-float {
+  animation-name: fx-float-up;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.board-fx-floater.mode-fall {
+  top: -8%;
+  bottom: auto;
+  animation-name: fx-fall-down;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes fx-float-up {
+  0%   { opacity: 0; transform: translateY(0) rotate(0deg); }
+  12%  { opacity: 0.9; }
+  85%  { opacity: 0.5; }
+  100% { opacity: 0; transform: translateY(-560px) rotate(35deg); }
+}
+@keyframes fx-fall-down {
+  0%   { opacity: 0; transform: translateY(0); }
+  12%  { opacity: 0.9; }
+  85%  { opacity: 0.5; }
+  100% { opacity: 0; transform: translateY(560px); }
+}
+@keyframes fx-flicker {
+  0%, 18%, 100% { opacity: 1; }
+  42% { opacity: 0.75; }
+  47% { opacity: 0.35; }
+  52% { opacity: 0.9; }
+  60% { opacity: 0.55; }
+  65% { opacity: 1; }
+}
+
+/* Igrač s invalidiranim animacijama (prefers-reduced-motion) */
+@media (prefers-reduced-motion: reduce) {
+  .board-fx-sign,
+  .board-fx-floater,
+  .board-fx-sheen {
+    animation: none !important;
+  }
+  .board-fx-sign,
+  .board-fx-floater {
+    opacity: 0.5;
+  }
+}
+
+/* Overlay za online igru — čekanje protivnika */
+.online-waiting-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+/* TOUCH-FRIENDLY: minimalni dimenziji ciljeva 44px na uređajima s dodirnim ekranom */
+@media (pointer: coarse) {
+  .lang-btn {
+    min-height: 44px;
+    padding: 10px 16px;
+  }
+  .tab-btn {
+    min-height: 44px;
+    padding: 12px 8px;
+  }
+  .time-preset-btn {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+  .avatar-edit-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .btn-back {
+    min-height: 44px;
+  }
+}
+
+
+/* ============ TUTORIAL / KAKO SE IGRUJE ============ */
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 10, 18, 0.82);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.tutorial-card {
+  max-width: 520px;
+  text-align: left;
+  padding: 28px 26px;
+}
+
+.tut-title {
+  color: #fce055;
+  font-size: 1.5rem;
+  font-weight: 900;
+  margin: 0 0 18px;
+  text-align: center;
+}
+
+.tutorial-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.tutorial-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.tut-num {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4af37 0%, #fce055 100%);
+  color: #071524;
+  font-weight: 900;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tutorial-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tutorial-actions .btn-gold,
+.tutorial-actions .btn-menu {
+  flex: 1 1 140px;
+  height: 52px;
+}
+
+/* ============ PLUTAJUĆI GUMBI (puni ekran, pomoć, postavke) ============ */
+.game-float-buttons {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 900;
+}
+
+.float-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 1.5px solid #d4af37;
+  background: rgba(13, 35, 58, 0.9);
+  color: #fce055;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: all 0.18s ease;
+  padding: 0;
+}
+
+.float-btn:hover {
+  background: linear-gradient(135deg, #d4af37 0%, #fce055 100%);
+  color: #071524;
+  transform: translateY(-1px);
+}
+
+@media (pointer: coarse) {
+  .float-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
