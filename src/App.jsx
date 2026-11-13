@@ -616,14 +616,8 @@ export default function App() {
 
       if (isWinnerP1) {
         window.__coinLossStreak = 0;
-        const updatedWithCoin = evaluateGameAchievements(profile, { coinTossWon: true });
-        updateProfileAndSave(updatedWithCoin);
       } else {
         window.__coinLossStreak = (window.__coinLossStreak || 0) + 1;
-        if (window.__coinLossStreak >= 3) {
-          const updatedWithBadLuck = evaluateGameAchievements(profile, { coinTossLossStreak: window.__coinLossStreak });
-          updateProfileAndSave(updatedWithBadLuck);
-        }
       }
 
       if (isAIMode && winnerId === 2) {
@@ -706,7 +700,8 @@ export default function App() {
       wonByBlock: isWin && (9 - myCaptured) > 2,
       lostByBlock: !isWin && (9 - enemyCaptured) > 2,
       totalTurns: turnCount || 30,
-      coinTossWon: Boolean(window.__lastCoinTossWon)
+      coinTossWon: Boolean(window.__lastCoinTossWon),
+      coinTossLossStreak: window.__coinLossStreak || 0
     });
 
     const fullAchCat = loadFullAchievementsCatalog(achievementsCatalog);
@@ -978,17 +973,18 @@ export default function App() {
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
 
-  const renderPlayerExperienceColumn = (pData, sideLabel) => {
+const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
 
     return (
       <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', padding: '14px 16px',
+        flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', padding: '14px 16px',
         backgroundColor: pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)',
         borderRadius: '12px', border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155', minWidth: '260px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
+        {/* Zaglavlje igrača */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#0f172a',
@@ -1010,7 +1006,33 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box' }}>
+        {/* Bodovi i raščlamba */}
+        <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box', textAlign: 'left' }}>
+          <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px dashed #1e293b' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>{pData.isWin ? (lang === 'hr' ? 'Osnovni bodovi (Pobjeda):' : 'Base points (Win):') : (lang === 'hr' ? 'Osnovni bodovi (Poraz):' : 'Base points (Loss):')}</span>
+              <span style={{ color: pData.baseDelta >= 0 ? '#4ade80' : '#f87171' }}>{pData.baseDelta >= 0 ? `+${pData.baseDelta}` : pData.baseDelta}</span>
+            </div>
+            {pData.millBonus > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>🎯 {lang === 'hr' ? `Mlin bonus (${pData.mills}):` : `Mill bonus (${pData.mills}):`}</span>
+                <span style={{ color: '#4ade80' }}>+{pData.millBonus}</span>
+              </div>
+            )}
+            {pData.domBonus > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>👑 {lang === 'hr' ? 'Dominantna pobjeda:' : 'Dominant win:'}</span>
+                <span style={{ color: '#4ade80' }}>+{pData.domBonus}</span>
+              </div>
+            )}
+            {pData.achievementBonusPoints > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>🏅 {lang === 'hr' ? 'Bonus za postignuća:' : 'Achievement bonus:'}</span>
+                <span style={{ color: '#fbbf24' }}>+{pData.achievementBonusPoints}</span>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
             <span style={{ fontSize: '0.82rem', color: '#e2e8f0', fontWeight: 'bold' }}>{lang === 'hr' ? 'Ukupno iz ovog meča:' : 'Total from this match:'}</span>
             <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: isPositive ? '#4ade80' : '#f87171' }}>
@@ -1022,6 +1044,47 @@ export default function App() {
             <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{pData.rankName}</span>
           </div>
         </div>
+
+        {/* Osvojena postignuća */}
+        {pData.newAchievements && pData.newAchievements.length > 0 && (
+          <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(251, 191, 36, 0.08)', borderRadius: '10px', border: '1px solid rgba(251, 191, 36, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>
+              🏅 {lang === 'hr' ? 'Nova Postignuća!' : 'New Achievements!'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {pData.newAchievements.map((rawAch) => {
+                const ach = getLocalizedAchievement(rawAch, lang);
+                return (
+                  <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#0f172a', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid #fbbf24' }}>
+                    <span style={{ fontSize: '1.25rem' }}>{ach.icon || '🏅'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#f8fafc' }}>{ach.title || ach.name}</div>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{ach.desc || ach.description}</div>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fbbf24' }}>+{ach.points || 10}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Otključani avatari */}
+        {pData.newAvatars && pData.newAvatars.length > 0 && (
+          <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#38bdf8', fontWeight: 'bold', marginBottom: '6px' }}>
+              🎭 {lang === 'hr' ? 'Otključani Avatari!' : 'Unlocked Avatars!'}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {pData.newAvatars.map((av) => (
+                <div key={av.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#0f172a', padding: '5px 10px', borderRadius: '999px', border: '1px solid #38bdf8' }}>
+                  <span style={{ fontSize: '1.2rem' }}>{av.icon || '🎭'}</span>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: '#e2e8f0' }}>{av.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
