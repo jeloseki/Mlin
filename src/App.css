@@ -207,7 +207,7 @@ body {
 .board-wrapper {
   position: relative;
   width: 100%;
-  max-width: 540px;
+  max-width: min(540px, 88vh);
   aspect-ratio: 1 / 1;
   background: radial-gradient(circle, #0e2e4d 0%, #071524 100%);
   border: 3px solid #d4af37;
@@ -755,3 +755,88 @@ body {
   border-color: #38bdf8;
   font-weight: 600;
 }
+
+/* MOBILNA PLOČA: manji ciljevi i figure na užim ekranima */
+@media (max-width: 640px) {
+  .board-node-slot {
+    width: 46px;
+    height: 46px;
+  }
+
+  .target-dot {
+    width: 22px;
+    height: 22px;
+  }
+
+  .floating-cursor-piece {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* VELIKI MOBILNI UREĐAJI */
+@media (max-width: 480px) {
+  .game-container {
+    padding: 8px;
+    padding-top: 44px;
+  }
+
+  .menu-card {
+    padding: 22px 14px;
+  }
+
+  .piece-slot {
+    width: 36px;
+    height: 36px;
+  }
+
+  .side-rack {
+    padding: 8px 10px;
+  }
+
+  .rack-pieces {
+    gap: 4px;
+  }
+
+  .captured-tray {
+    gap: 4px;
+  }
+
+  .piece-captured {
+    width: 26px;
+    height: 26px;
+  }
+
+  .status-bar {
+    padding: 12px;
+  }
+
+  .coin-choice-btns {
+    gap: 10px;
+  }
+
+  .avatar-uploader {
+    padding: 18px;
+  }
+
+  .time-preset-group,
+  .mode-toggle-group {
+    flex-wrap: wrap;
+  }
+
+  .time-preset-btn,
+  .mode-btn {
+    min-width: 64px;
+  }
+
+  .leaderboard-btns {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .leaderboard-btns button {
+    width: auto;
+    flex: 1;
+  }
+}
+
