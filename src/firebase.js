@@ -2,13 +2,13 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDDciCkCCDb2uFAZdzH5jpv8Q_jvEMr2Ik",
-  authDomain: "mlin-12e8c.firebaseapp.com",
-  projectId: "mlin-12e8c",
-  storageBucket: "mlin-12e8c.firebasestorage.app",
-  messagingSenderId: "77410627422",
-  appId: "1:77410627422:web:0e41cc5aeea208a7f569cf",
-  measurementId: "G-8B7443DG1N"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 // Inicijalizacija Firebase aplikacije

@@ -16,6 +16,7 @@ import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase
 import { exportProfileToPDF } from './utils/pdfExport';
 import { getStoredBoards, getLocalizedBoardName } from './boardsData';
 import { TRANSLATIONS } from './translations';
+import { profileSchema } from './validators';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
