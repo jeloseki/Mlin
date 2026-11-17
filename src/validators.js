@@ -22,3 +22,9 @@ export const profileSchema = z.object({
   activeBoard: z.string().optional(),
   unlockedBoards: z.array(z.string()).optional()
 }).passthrough(); // passthrough() čuva ostala polja da ih Zod ne izbriše
+
+// Šema za provjeru unosa kod prijave i registracije
+export const authSchema = z.object({
+  email: z.string().email("Unesite valjanu e-mail adresu."),
+  password: z.string().min(6, "Lozinka mora imati najmanje 6 znakova.")
+});

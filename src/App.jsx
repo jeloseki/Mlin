@@ -9,14 +9,25 @@ import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { db } from './firebase';
+// === FIREBASE AUTH UVOZ ===
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup 
+} from 'firebase/auth';
+import { db, auth } from './firebase';
+// ==========================
 import { getStoredAchievements, getLocalizedAchievement, ACHIEVEMENT_TIERS } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 import { exportProfileToPDF } from './utils/pdfExport';
 import { getStoredBoards, getLocalizedBoardName } from './boardsData';
 import { TRANSLATIONS } from './translations';
-import { profileSchema } from './validators';
+// === ZOD UVOZ ===
+import { profileSchema, playerNameSchema, authSchema } from './validators';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -115,10 +126,10 @@ const playAudioEffect = (type, soundEnabled = true) => {
   } catch (e) { }
 };
 
-const loadSyncedProfile = () => {
+const loadSyncedProfile = (userEmail = null) => {
   const defaultAvatars = getDefaultUnlockedAvatarIds();
   let userProf = {
-    name: 'Igrač 1',
+    name: userEmail ? userEmail.split('@')[0] : 'Igrač 1',
     avatar: '🦁',
     bio: 'Spreman za igru!',
     points: 0,
@@ -130,39 +141,15 @@ const loadSyncedProfile = () => {
   };
 
   try {
-    const savedUser = localStorage.getItem('mlin_user_profile');
+    const storageKey = userEmail ? `mlin_user_profile_${userEmail}` : 'mlin_user_profile';
+    const savedUser = localStorage.getItem(storageKey);
     if (savedUser) {
-      userProf = { ...userProf, ...JSON.parse(savedUser) };
-    }
-  } catch (e) { }
-
-  try {
-    const savedAdminProfiles = localStorage.getItem('mlin_admin_profiles');
-    if (savedAdminProfiles) {
-      const adminList = JSON.parse(savedAdminProfiles);
-      if (Array.isArray(adminList)) {
-        const match = adminList.find(
-          p => (p.id && p.id === userProf.id) || (p.name && userProf.name && p.name.toLowerCase() === userProf.name.toLowerCase())
-        );
-        if (match) {
-          const mergedAchs = Array.from(new Set([
-            ...(Array.isArray(userProf.achievements) ? userProf.achievements : []),
-            ...(Array.isArray(match.achievements) ? match.achievements : [])
-          ]));
-          const mergedAvatars = Array.from(new Set([
-            ...defaultAvatars,
-            ...(Array.isArray(userProf.unlockedAvatars) ? userProf.unlockedAvatars : []),
-            ...(Array.isArray(match.unlockedAvatars) ? match.unlockedAvatars : [])
-          ]));
-          userProf = {
-            ...userProf,
-            id: userProf.id || match.id,
-            achievements: mergedAchs,
-            unlockedAvatars: mergedAvatars,
-            wins: Number(match.wins ?? userProf.wins ?? 0),
-            losses: Number(match.losses ?? userProf.losses ?? 0)
-          };
-        }
+      const parsed = JSON.parse(savedUser);
+      const validation = profileSchema.safeParse(parsed);
+      if (validation.success) {
+        userProf = { ...userProf, ...validation.data };
+      } else {
+        localStorage.setItem(storageKey, JSON.stringify(userProf));
       }
     }
   } catch (e) { }
@@ -225,44 +212,144 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const fileInputRef = useRef(null);
 
+  // === FIREBASE AUTH & NICKNAME STATEOVI ===
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMode, setAuthMode] = useState('LOGIN'); 
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [newNicknameInput, setNewNicknameInput] = useState('');
+  const [nicknameError, setNicknameError] = useState('');
+  // ===========================================
+
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [adminLoginError, setAdminLoginError] = useState('');
+  const [titleClickCount, setTitleClickCount] = useState(0);
+  const [nameError, setNameError] = useState('');
+
   const [leaderboard, setLeaderboard] = useState([]);
   const [profile, setProfile] = useState(() => loadSyncedProfile());
   const [achievementsCatalog, setAchievementsCatalog] = useState(() => {
-    try {
-      return getStoredAchievements();
-    } catch (e) {
-      return [];
-    }
+    try { return getStoredAchievements(); } catch (e) { return []; }
   });
 
   const [avatarsCatalog, setAvatarsCatalog] = useState(() => getStoredAvatars());
   const [achievementFilter, setAchievementFilter] = useState('ALL');
 
+  // === PRAĆENJE FIREBASE AUTENTIFIKACIJE I UČITAVANJE PROFILA ===
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+      if (user) {
+        const userEmailKey = user.email;
+        const loadedProf = loadSyncedProfile(userEmailKey);
+        const hasExistingSavedData = localStorage.getItem(`mlin_user_profile_${userEmailKey}`);
+        
+        setProfile(loadedProf);
+
+        if (!hasExistingSavedData) {
+          setShowNicknameModal(true);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setAuthError('');
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      setAuthError(err.message.replace('Firebase: ', ''));
+    }
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+
+    const validation = authSchema.safeParse({ email: authEmail, password: authPassword });
+    if (!validation.success) {
+      setAuthError(validation.error.issues[0].message);
+      return;
+    }
+
+    try {
+      if (authMode === 'LOGIN') {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      } else {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (err) {
+      setAuthError(err.message.replace('Firebase: ', ''));
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setCurrentScreen('MAIN_MENU');
+  };
+
   const updateProfileAndSave = (updater) => {
     setProfile(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const candidate = typeof updater === 'function' ? updater(prev) : updater;
+      const validation = profileSchema.safeParse(candidate);
+      const next = validation.success ? validation.data : prev;
+
       try {
-        localStorage.setItem('mlin_user_profile', JSON.stringify(next));
-        const savedAdmin = localStorage.getItem('mlin_admin_profiles');
-        if (savedAdmin) {
-          const adminList = JSON.parse(savedAdmin);
-          if (Array.isArray(adminList)) {
-            const updatedAdmin = adminList.map(p =>
-              ((p.id && p.id === next.id) || (p.name && next.name && p.name.toLowerCase() === next.name.toLowerCase()))
-                ? { ...p, ...next }
-                : p
-            );
-            localStorage.setItem('mlin_admin_profiles', JSON.stringify(updatedAdmin));
-          }
-        }
+        const storageKey = currentUser?.email ? `mlin_user_profile_${currentUser.email}` : 'mlin_user_profile';
+        localStorage.setItem(storageKey, JSON.stringify(next));
       } catch (e) { }
       return next;
     });
   };
 
   useEffect(() => {
+    if (location.pathname === '/adminlogin' || location.pathname === '/adminpanel') {
+      setCurrentScreen('ADMIN_LOGIN');
+    }
+  }, [location.pathname]);
+
+  const handleAdminLoginSubmit = (e) => {
+    e.preventDefault();
+    const secretPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+
+    if (!secretPassword) {
+      setAdminLoginError('Greška: VITE_ADMIN_PASSWORD nije pronađen u .env datoteci!');
+      return;
+    }
+
+    if (adminPasswordInput.trim() === secretPassword.trim()) {
+      sessionStorage.setItem('mlin_admin_auth', 'true');
+      setAdminPasswordInput('');
+      setAdminLoginError('');
+      navigate('/admin');
+    } else {
+      setAdminLoginError(lang === 'hr' ? 'Netočna administratorska lozinka!' : 'Incorrect admin password!');
+    }
+  };
+
+  const handleSecretTitleClick = () => {
+    setTitleClickCount(prev => {
+      const next = prev + 1;
+      if (next >= 3) {
+        setCurrentScreen('ADMIN_LOGIN');
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
     const updateCatalogs = async () => {
-      const freshProfile = loadSyncedProfile();
+      const freshProfile = loadSyncedProfile(currentUser?.email);
       setProfile(freshProfile);
 
       const savedCustomAch = localStorage.getItem('mlin_admin_achievements');
@@ -293,7 +380,7 @@ export default function App() {
 
     window.addEventListener('storage', updateCatalogs);
     return () => window.removeEventListener('storage', updateCatalogs);
-  }, [currentScreen]);
+  }, [currentScreen, currentUser]);
 
   const [profileTab, setProfileTab] = useState('STATS');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -343,22 +430,8 @@ export default function App() {
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const isMouseDownRef = useRef(false);
 
-  const DEFAULT_SCORING_RULES = [
-    { id: 'rule-win', icon: '🏆', title: 'Pobjeda', value: '+12 Bodova' },
-    { id: 'rule-loss', icon: '❌', title: 'Poraz', value: '-6 Bodova' },
-    { id: 'rule-mill', icon: '🎯', title: 'Mlin bonus', value: '+1 Bod po mlinu (Max +4 po meču)' },
-    { id: 'rule-dom', icon: '👑', title: 'Dominantna pobjeda (6+ figura)', value: '+3 Boda' },
-    { id: 'rule-streak', icon: '🔥', title: 'Niz pobjeda (3+ pobjede u nizu)', value: '+3 Boda' },
-    { id: 'rule-prot', icon: '🛡️', title: 'Zaštita', value: 'Bodovi ne mogu pasti ispod 0' }
-  ];
-
   const [sortBy, setSortBy] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
-
-  const [activeScoringRules, setActiveScoringRules] = useState(() => {
-    const saved = localStorage.getItem('mlin_scoring_rules');
-    return saved ? JSON.parse(saved) : DEFAULT_SCORING_RULES;
-  });
 
   const handleExportProfilePDF = () => {
     exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog), lang);
@@ -370,20 +443,6 @@ export default function App() {
     const foundTheme = boards.find(b => b.id === activeId) || boards[0];
     setActiveBoardTheme(foundTheme);
   }, [profile.activeBoard]);
-
-  useEffect(() => {
-    const refreshRules = () => {
-      const saved = localStorage.getItem('mlin_scoring_rules');
-      if (saved) {
-        try {
-          setActiveScoringRules(JSON.parse(saved));
-        } catch (e) { }
-      }
-    };
-    refreshRules();
-    window.addEventListener('storage', refreshRules);
-    return () => window.removeEventListener('storage', refreshRules);
-  }, [currentScreen]);
 
   useEffect(() => {
     if (onlineGameId) {
@@ -551,7 +610,8 @@ export default function App() {
     setMillsCount({ WHITE: 0, BLACK: 0 });
     setTurnCount(0);
     setP1Name(profile.name);
-    setP2Name('Igrač 2');
+    setP2Name(lang === 'hr' ? 'Igrač 2' : 'Player 2');
+    setNameError('');
     setSetupStep('NAMES');
     setCurrentScreen('GAME');
     setCaptured({ WHITE: 0, BLACK: 0 });
@@ -573,13 +633,29 @@ export default function App() {
     setTurnCount(0);
     setP1Name(profile.name);
     setP2Name(`AI (${difficulty})`);
+    setNameError('');
     setSetupStep('NAMES');
     setCurrentScreen('GAME');
     setCaptured({ WHITE: 0, BLACK: 0 });
   };
 
   const handleProceedToCoinToss = async () => {
-    const p1Data = await getOrCreateProfile(p1Name);
+    const p1Check = playerNameSchema.safeParse(p1Name);
+    if (!p1Check.success) {
+      setNameError(`Player 1: ${p1Check.error.issues[0].message}`);
+      return;
+    }
+
+    if (!isAIMode) {
+      const p2Check = playerNameSchema.safeParse(p2Name);
+      if (!p2Check.success) {
+        setNameError(`Player 2: ${p2Check.error.issues[0].message}`);
+        return;
+      }
+    }
+
+    setNameError('');
+    const p1Data = await getOrCreateProfile(p1Check.data);
     if (p1Data) {
       updateProfileAndSave(prev => ({
         ...prev,
@@ -590,7 +666,7 @@ export default function App() {
       }));
     }
     if (!isAIMode && p2Name) {
-      await getOrCreateProfile(p2Name);
+      await getOrCreateProfile(p2Name.trim());
     }
     setSetupStep('COIN_TOSS');
   };
@@ -657,7 +733,7 @@ export default function App() {
   const getPiecesCount = (color) => board.filter(cell => cell === color).length;
 
   const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI, lang = 'hr') => {
-    const t = TRANSLATIONS[lang]; // Dohvati lokalizirane prijevode za taj jezik
+    const t = TRANSLATIONS[lang];
     const defaultAvs = getDefaultUnlockedAvatarIds();
     const prevAchs = (Array.isArray(baseProf.achievements) ? baseProf.achievements : []).map(id => String(id).trim());
     const prevAvs = Array.from(new Set([...defaultAvs, ...(Array.isArray(baseProf.unlockedAvatars) ? baseProf.unlockedAvatars : [])]));
@@ -770,7 +846,7 @@ export default function App() {
     const isP1Winner = winningColor === p1ColorActual;
     playAudioEffect(isP1Winner ? 'victory' : 'defeat', soundEnabled);
 
-    const p1BaseProfile = { ...loadSyncedProfile(), name: p1Name || profile.name };
+    const p1BaseProfile = { ...loadSyncedProfile(currentUser?.email), name: p1Name || profile.name };
     const p1Result = computePlayerExperience(p1BaseProfile, isP1Winner, p1ColorActual, p2Name, isAIMode, lang);
     updateProfileAndSave(p1Result.updatedProfile);
     saveMatchHistory(p1Result.newMatch);
@@ -974,7 +1050,7 @@ export default function App() {
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
 
-const renderPlayerExperienceColumn = (pData, sideLabel) => {
+  const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
 
@@ -984,7 +1060,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
         backgroundColor: pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)',
         borderRadius: '12px', border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155', minWidth: '260px'
       }}>
-        {/* Zaglavlje igrača */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
@@ -1007,7 +1082,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
           </div>
         </div>
 
-        {/* Bodovi i raščlamba */}
         <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box', textAlign: 'left' }}>
           <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px dashed #1e293b' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1046,7 +1120,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
           </div>
         </div>
 
-        {/* Osvojena postignuća */}
         {pData.newAchievements && pData.newAchievements.length > 0 && (
           <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(251, 191, 36, 0.08)', borderRadius: '10px', border: '1px solid rgba(251, 191, 36, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>
@@ -1070,7 +1143,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
           </div>
         )}
 
-        {/* Otključani avatari */}
         {pData.newAvatars && pData.newAvatars.length > 0 && (
           <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#38bdf8', fontWeight: 'bold', marginBottom: '6px' }}>
@@ -1090,6 +1162,99 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
     );
   };
 
+  // === PROVJERA JE LI KORISNIK PRIJAVLJEN (AUTH EKRAN SA ZLATNIM OKVIROM I IZBOROM JEZIKA) ===
+  if (authLoading) {
+    return <div className="game-container" style={{ color: '#fff', textAlign: 'center', paddingTop: '20vh' }}>Učitavanje...</div>;
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="game-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#060b16' }}>
+        <div style={{
+          maxWidth: '400px', width: '90%', background: '#0f172a', border: '2px solid #d4af37',
+          borderRadius: '16px', padding: '24px', boxShadow: '0 12px 40px rgba(0,0,0,0.7)', color: '#f8fafc', position: 'relative'
+        }}>
+          {/* ODABIR JEZIKA U GORNJEM DESNOM KUTU */}
+          <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '4px' }}>
+            <button className={`lang-btn ${lang === 'hr' ? 'active' : ''}`} onClick={() => setLang('hr')} style={{ padding: '2px 6px', fontSize: '0.7rem' }}>HR</button>
+            <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={() => setLang('en')} style={{ padding: '2px 6px', fontSize: '0.7rem' }}>EN</button>
+          </div>
+
+          <h2 style={{ color: '#fce055', textAlign: 'center', marginBottom: '16px', fontSize: '1.4rem' }}>
+            {authMode === 'LOGIN' ? (lang === 'hr' ? '🔐 Prijava u Mlin' : '🔐 Sign in to Mill') : (lang === 'hr' ? '📝 Registracija' : '📝 Register')}
+          </h2>
+
+          {/* GOOGLE LOGIN GUMB */}
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            style={{
+              width: '100%', padding: '10px', borderRadius: '8px', background: '#ffffff', color: '#0f172a',
+              border: '1px solid #d4af37', fontWeight: 'bold', cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '10px', fontSize: '0.9rem'
+            }}
+          >
+            <span style={{ fontSize: '1.1rem' }}>🌐</span> {lang === 'hr' ? 'Prijavite se s Googleom' : 'Sign in with Google'}
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', margin: '14px 0', color: '#94a3b8', fontSize: '0.78rem' }}>
+            <div style={{ flex: 1, height: '1px', background: '#334155' }} />
+            <span style={{ padding: '0 10px' }}>{lang === 'hr' ? 'ili e-mailom' : 'or with email'}</span>
+            <div style={{ flex: 1, height: '1px', background: '#334155' }} />
+          </div>
+
+          <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ fontSize: '0.78rem', color: '#fce055', display: 'block', marginBottom: '4px' }}>
+                {lang === 'hr' ? 'E-mail adresa' : 'Email address'}
+              </label>
+              <input
+                type="email"
+                placeholder="vas.email@primjer.com"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#071524', border: '1px solid #d4af37', color: '#fff', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.78rem', color: '#fce055', display: 'block', marginBottom: '4px' }}>
+                {lang === 'hr' ? 'Lozinka (min. 6 znakova)' : 'Password (min. 6 chars)'}
+              </label>
+              <input
+                type="password"
+                placeholder="••••••"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#071524', border: '1px solid #d4af37', color: '#fff', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {authError && (
+              <div style={{ color: '#ef4444', fontSize: '0.8rem', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '8px', borderRadius: '6px' }}>
+                ⚠️ {authError}
+              </div>
+            )}
+
+            <button type="submit" className="btn-gold" style={{ marginTop: '6px' }}>
+              {authMode === 'LOGIN' ? (lang === 'hr' ? 'Prijavi se' : 'Sign in') : (lang === 'hr' ? 'Kreiraj račun' : 'Create Account')}
+            </button>
+          </form>
+
+          <div style={{ textAlign: 'center', marginTop: '16px' }}>
+            <button
+              type="button"
+              onClick={() => { setAuthMode(authMode === 'LOGIN' ? 'REGISTER' : 'LOGIN'); setAuthError(''); }}
+              style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '0.82rem', textDecoration: 'underline' }}
+            >
+              {authMode === 'LOGIN' ? (lang === 'hr' ? 'Nemate račun? Registrirajte se' : "Don't have an account? Register") : (lang === 'hr' ? 'Već imate račun? Prijavite se' : 'Already have an account? Sign In')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="game-container" onClick={() => {
       if (selectedNode !== null || activeHeldPiece !== null) {
@@ -1097,6 +1262,60 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
         setActiveHeldPiece(null);
       }
     }}>
+      {/* MODAL ZA UNOS NADIMKA KOD PRVE REGISTRACIJE */}
+      {showNicknameModal && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(6, 11, 22, 0.9)', backdropFilter: 'blur(8px)',
+          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1400, padding: '16px'
+        }}>
+          <div style={{ maxWidth: '380px', width: '100%', background: '#0f172a', border: '2px solid #d4af37', borderRadius: '16px', padding: '24px', textAlign: 'center', color: '#f8fafc' }}>
+            <h3 style={{ color: '#fce055', marginBottom: '8px' }}>
+              {lang === 'hr' ? '✨ Dobrodošli! Odaberite nadimak' : '✨ Welcome! Choose a Nickname'}
+            </h3>
+            <p style={{ color: '#94a3b8', fontSize: '0.82rem', marginBottom: '16px' }}>
+              {lang === 'hr' ? 'Pod ovim imenom igrat ćete mečeve i pojavljivati se na ljestvici.' : 'Under this name you will play matches and appear on the leaderboard.'}
+            </p>
+
+            <input
+              type="text"
+              maxLength={12}
+              placeholder="Npr. MlinMaster"
+              value={newNicknameInput}
+              onChange={(e) => { setNewNicknameInput(e.target.value); setNicknameError(''); }}
+              style={{
+                width: '100%', padding: '10px', borderRadius: '8px', background: '#071524',
+                border: '1px solid #d4af37', color: '#fff', boxSizing: 'border-box', textAlign: 'center', fontSize: '1rem'
+              }}
+              autoFocus
+            />
+
+            {nicknameError && (
+              <div style={{ color: '#ef4444', fontSize: '0.78rem', fontWeight: 'bold', marginTop: '6px' }}>
+                ⚠️ {nicknameError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="btn-gold"
+              style={{ marginTop: '16px', width: '100%' }}
+              onClick={() => {
+                const check = playerNameSchema.safeParse(newNicknameInput.trim());
+                if (!check.success) {
+                  setNicknameError(check.error.issues[0].message);
+                  return;
+                }
+                updateProfileAndSave(prev => ({ ...prev, name: check.data }));
+                setShowNicknameModal(false);
+                setNewNicknameInput('');
+              }}
+            >
+              {lang === 'hr' ? 'Nastavi u igru' : 'Continue to Game'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeHeldPiece && !winner && (
         <div className={`floating-cursor-piece ${activeHeldPiece.color === 'WHITE' ? 'piece-white' : 'piece-black'}`} style={{ left: `${mousePos.x}px`, top: `${mousePos.y}px` }} />
       )}
@@ -1107,28 +1326,24 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
       {currentScreen === 'MAIN_MENU' && (
         <div className="menu-card menu-card-wide" onClick={(e) => e.stopPropagation()}>
           <div className="menu-header">
-            <h1 className="menu-title">{t.menuTitle}</h1>
+            <h1
+              className="menu-title"
+              onClick={handleSecretTitleClick}
+              style={{ cursor: 'pointer', userSelect: 'none' }}
+              title="Mlin"
+            >
+              {t.menuTitle}
+            </h1>
             <div className="lang-switcher-inline">
               <button className={`lang-btn ${lang === 'hr' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('hr'); }}>HR</button>
               <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setLang('en'); }}>EN</button>
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', margin: '0 0 16px 0' }}>
-            <button
-              type="button"
-              onClick={() => navigate('/admin')}
-              style={{
-                backgroundColor: '#1e293b', color: '#fbbf24', border: '1px solid #d97706',
-                padding: '8px 20px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer'
-              }}
-            >
-              {t.adminPanel}
-            </button>
-          </div>
+
           <div className="menu-grid-2col">
             <button className="btn-menu" onClick={startCouchGame}>{t.playOffline}</button>
             <button className="btn-menu" onClick={() => {
-              setProfile(loadSyncedProfile());
+              setProfile(loadSyncedProfile(currentUser?.email));
               setAchievementsCatalog(loadFullAchievementsCatalog());
               setProfileTab('STATS');
               setCurrentScreen('PROFILE');
@@ -1139,12 +1354,64 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
             <button className="btn-menu" onClick={() => {
-              setProfile(loadSyncedProfile());
+              setProfile(loadSyncedProfile(currentUser?.email));
               setAchievementsCatalog(loadFullAchievementsCatalog());
               setCurrentScreen('ACHIEVEMENTS');
             }}>{t.achievementsMenu}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SETTINGS')}>{t.settings}</button>
           </div>
+
+          <div style={{ marginTop: '18px', textAlign: 'center' }}>
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.78rem',
+                cursor: 'pointer', textDecoration: 'underline'
+              }}
+            >
+              {lang === 'hr' ? 'Odjavi se' : 'Log out'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN LOGIN */}
+      {currentScreen === 'ADMIN_LOGIN' && (
+        <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+          <h2 className="menu-title">🔒 Admin Pristup</h2>
+          <form onSubmit={handleAdminLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <input
+              type="password"
+              placeholder={lang === 'hr' ? 'Unesite admin lozinku...' : 'Enter admin password...'}
+              value={adminPasswordInput}
+              onChange={(e) => setAdminPasswordInput(e.target.value)}
+              autoFocus
+              style={{
+                padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155',
+                backgroundColor: '#0f172a', color: '#fff', fontSize: '0.95rem', textAlign: 'center'
+              }}
+            />
+            {adminLoginError && (
+              <div style={{ color: '#ef4444', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                {adminLoginError}
+              </div>
+            )}
+            <button type="submit" className="btn-gold" style={{ marginTop: '4px' }}>
+              {lang === 'hr' ? 'Prijavi se' : 'Login'}
+            </button>
+            <button
+              type="button"
+              className="btn-menu btn-back"
+              onClick={() => {
+                setAdminPasswordInput('');
+                setAdminLoginError('');
+                if (location.pathname !== '/') navigate('/');
+                setCurrentScreen('MAIN_MENU');
+              }}
+            >
+              {t.back}
+            </button>
+          </form>
         </div>
       )}
 
@@ -1195,7 +1462,7 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
             <div className="profile-tabs">
               <button className={`tab-btn ${profileTab === 'STATS' ? 'active' : ''}`} onClick={() => setProfileTab('STATS')}>{t.tabStats}</button>
               <button className={`tab-btn ${profileTab === 'BADGES' ? 'active' : ''}`} onClick={() => {
-                setProfile(loadSyncedProfile());
+                setProfile(loadSyncedProfile(currentUser?.email));
                 setAchievementsCatalog(loadFullAchievementsCatalog());
                 setProfileTab('BADGES');
               }}>{t.tabBadges}</button>
@@ -1207,7 +1474,7 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
           {profileTab === 'BOARDS' && (
             <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
               {(() => {
-                const liveProfile = loadSyncedProfile();
+                const liveProfile = loadSyncedProfile(currentUser?.email);
                 const unlockedBoardIds = Array.isArray(liveProfile?.unlockedBoards) ? liveProfile.unlockedBoards : ['classic-wood'];
                 const allBoards = getStoredBoards();
 
@@ -1265,7 +1532,7 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
           {profileTab === 'BADGES' && (
             <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
               {(() => {
-                const liveProfile = loadSyncedProfile();
+                const liveProfile = loadSyncedProfile(currentUser?.email);
                 const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
                 const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
                 const unlockedList = userAchs.map(achId => uniqueCatalog.find(a => String(a.id).trim() === achId) || { id: achId, title: `Postignuće (${achId})`, desc: 'Ostvareno', icon: '🏅' });
@@ -1275,7 +1542,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
                 }
 
                 return unlockedList.map((rawAch) => {
-                  // OVDJE DODAJEMO POZIV FUNKCIJE ZA PREVOĐENJE
                   const ach = getLocalizedAchievement(rawAch, lang);
 
                   return (
@@ -1507,7 +1773,7 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
       {currentScreen === 'ACHIEVEMENTS' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
           {(() => {
-            const liveProfile = loadSyncedProfile();
+            const liveProfile = loadSyncedProfile(currentUser?.email);
             const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
             const fullCat = loadFullAchievementsCatalog(achievementsCatalog);
 
@@ -1548,7 +1814,6 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
                       return true;
                     })
                     .map((rawAch) => {
-                      // OVDJE POZIVAMO FUNKCIJU ZA PREVOĐENJE POSTIGNUĆA
                       const ach = getLocalizedAchievement(rawAch, lang);
 
                       const isUnlocked = userAchs.includes(String(ach.id).trim());
@@ -1600,12 +1865,18 @@ const renderPlayerExperienceColumn = (pData, sideLabel) => {
                     <h2>{t.titleNames}</h2>
                     <div>
                       <label>{t.p1Label}</label>
-                      <input type="text" maxLength={12} value={p1Name} onChange={(e) => setP1Name(e.target.value)} />
+                      <input type="text" maxLength={12} value={p1Name} onChange={(e) => { setP1Name(e.target.value); setNameError(''); }} />
                     </div>
                     <div style={{ marginTop: '10px' }}>
                       <label>{t.p2Label}</label>
-                      <input type="text" maxLength={12} value={p2Name} disabled={isAIMode} onChange={(e) => setP2Name(e.target.value)} />
+                      <input type="text" maxLength={12} value={p2Name} disabled={isAIMode} onChange={(e) => { setP2Name(e.target.value); setNameError(''); }} />
                     </div>
+
+                    {nameError && (
+                      <div style={{ color: '#ef4444', fontSize: '0.8rem', fontWeight: 'bold', marginTop: '8px' }}>
+                        ⚠️ {nameError}
+                      </div>
+                    )}
 
                     <div className="game-mode-selector">
                       <div className="mode-toggle-group">
