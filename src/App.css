@@ -908,3 +908,7 @@ body {
 @keyframes tier-pulse-red { 0% { box-shadow: 0 0 18px rgba(239, 68, 68, 0.7); } 100% { box-shadow: 0 0 34px rgba(239, 68, 68, 1); } }
 @keyframes tier-pulse-gold { 0% { box-shadow: 0 0 20px rgba(250, 204, 21, 0.75); } 100% { box-shadow: 0 0 38px rgba(250, 204, 21, 1); } }
 @keyframes cosmic-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

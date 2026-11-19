@@ -8,7 +8,7 @@ import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
 import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
 // === FIREBASE AUTH UVOZ ===
 import {
   signInWithEmailAndPassword,
@@ -29,6 +29,10 @@ import { TRANSLATIONS } from './translations';
 // === ZOD UVOZ ===
 import { profileSchema, playerNameSchema, authSchema } from './validators';
 import { getPlayerTitle, getPlayerTitleTierClass } from './titlesData';
+import { startOnlineMatchmaking } from './onlineMatchmaking';
+
+const ABANDON_PENALTY_POINTS = 15; // Više od standardnog poraza (-6), nikad ispod 0
+const OFFLINE_ABANDON_SECONDS = 30;
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -50,6 +54,21 @@ const RANK_STEPS = [
   { min: 3800, hr: '🏆 Velemajstor', en: '🏆 Grandmaster' }
 ];
 
+const MATCHMAKING_TIPS = {
+  hr: [
+    '💡 Savjet: Pokušaj složiti "dvostruki mlin" (dva mlina koja dijele jednu figuru) za lakše zatvaranje linija.',
+    '💡 Savjet: U fazi postavljanja kontroliraj središnje i kutne čvorove jer imaju više veza.',
+    '💡 Savjet: Kad protivnik ima točno 3 figure, smije letjeti bilo kamo — pazi na njegove prijetnje!',
+    '💡 Savjet: Nemoj zatvoriti vlastiti mlin prerano ako ti figura treba za blokadu protivnika.'
+  ],
+  en: [
+    '💡 Tip: Build a "double mill" sharing a pivot piece so you can open and close a mill every turn.',
+    '💡 Tip: Prioritize high-degree intersections early to keep mobility options open.',
+    '💡 Tip: Once an opponent drops to 3 pieces, they can fly anywhere — guard against sudden mills!',
+    '💡 Tip: Sometimes keeping a piece outside a mill gives you better defensive control.'
+  ]
+};
+
 const getRankName = (points, lang) => {
   let rank = RANK_STEPS[0];
   for (let r of RANK_STEPS) {
@@ -57,6 +76,15 @@ const getRankName = (points, lang) => {
     else break;
   }
   return lang === 'hr' ? rank.hr : rank.en;
+};
+
+const getRankIndex = (points = 0) => {
+  let idx = 0;
+  for (let i = 0; i < RANK_STEPS.length; i++) {
+    if (points >= RANK_STEPS[i].min) idx = i;
+    else break;
+  }
+  return idx;
 };
 
 const playAudioEffect = (type, soundEnabled = true) => {
@@ -78,6 +106,20 @@ const playAudioEffect = (type, soundEnabled = true) => {
       osc.frequency.exponentialRampToValueAtTime(45, now + 0.12);
       gain.gain.setValueAtTime(0.4, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
       osc.start(); osc.stop(now + 0.12);
+    } else if (type === 'matchFound') {
+      const chord = [440, 554.37, 659.25, 880];
+      chord.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        osc.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+        gain.gain.setValueAtTime(0.18, now + idx * 0.07);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.07 + 0.24);
+        osc.start(now + idx * 0.07);
+        osc.stop(now + idx * 0.07 + 0.24);
+      });
     } else if (type === 'coinSpin') {
       for (let i = 0; i < 14; i++) {
         const osc = ctx.createOscillator(); const gain = ctx.createGain();
@@ -99,7 +141,7 @@ const playAudioEffect = (type, soundEnabled = true) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        osc.connect(ctx.destination);
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, now + idx * 0.12);
         const duration = idx === notes.length - 1 ? 0.35 : 0.11;
@@ -114,7 +156,7 @@ const playAudioEffect = (type, soundEnabled = true) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        osc.connect(ctx.destination);
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(freq, now + idx * 0.18);
         osc.frequency.exponentialRampToValueAtTime(freq * 0.85, now + idx * 0.18 + 0.17);
@@ -244,6 +286,9 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('MAIN_MENU');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const fileInputRef = useRef(null);
+  const onlineRewardProcessedRef = useRef(null);
+  const latestOnlineGameDataRef = useRef(null);
+  const abandonHandledRef = useRef(false);
 
   // === FIREBASE AUTH & NICKNAME STATEOVI ===
   const [currentUser, setCurrentUser] = useState(null);
@@ -257,6 +302,24 @@ export default function App() {
   const [newNicknameInput, setNewNicknameInput] = useState('');
   const [nicknameError, setNicknameError] = useState('');
   // ===========================================
+
+  // === ONLINE MATCHMAKING & ZABAVNI LOADING STATE ===
+  const [matchmakingInfo, setMatchmakingInfo] = useState({ seconds: 0, allowedDiff: 0 });
+  const [matchmakingError, setMatchmakingError] = useState('');
+  const [tipIndex, setTipIndex] = useState(0);
+  const [activeTargetNode, setActiveTargetNode] = useState(4);
+  const [reflexScore, setReflexScore] = useState(0);
+  const [bestReflexScore, setBestReflexScore] = useState(() => {
+    try {
+      return Number(localStorage.getItem('mlin_queue_best_reflex') || 0);
+    } catch (e) {
+      return 0;
+    }
+  });
+  const [onlineOpponentStats, setOnlineOpponentStats] = useState({ wins: 0, losses: 0 });
+  const [disconnectSeconds, setDisconnectSeconds] = useState(0);
+  const [abandonBanner, setAbandonBanner] = useState('');
+  // ===================================================
 
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminLoginError, setAdminLoginError] = useState('');
@@ -283,6 +346,7 @@ export default function App() {
         const hasExistingSavedData = localStorage.getItem(`mlin_user_profile_${userEmailKey}`);
 
         setProfile(loadedProf);
+        syncProfileToCloudAndAdmin(loadedProf, user);
 
         if (!hasExistingSavedData) {
           setShowNicknameModal(true);
@@ -291,6 +355,78 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // === POKRETANJE I ČIŠĆENJE ONLINE MATCHMAKINGA + ANIMACIJE ČEKAONICE ===
+  useEffect(() => {
+    if (currentScreen !== 'ONLINE_SEARCH') {
+      return;
+    }
+
+    setMatchmakingInfo({ seconds: 0, allowedDiff: 0 });
+    setMatchmakingError('');
+    setReflexScore(0);
+    setTipIndex(0);
+    setActiveTargetNode(Math.floor(Math.random() * 9));
+
+    const stopSearch = startOnlineMatchmaking({
+      user: currentUser,
+      playerName: profile.name,
+      points: profile.points,
+      wins: profile.wins,
+      losses: profile.losses,
+      rankIndex: getRankIndex(profile.points),
+      onStatusChange: (info) => setMatchmakingInfo(info),
+      onMatchFound: ({ gameId }) => {
+        playAudioEffect('matchFound', soundEnabled);
+        onlineRewardProcessedRef.current = null;
+        latestOnlineGameDataRef.current = null;
+        abandonHandledRef.current = false;
+        setDisconnectSeconds(0);
+        setWinner(null);
+        setMatchSummary(null);
+        setSetupStep('PLAY');
+        setCurrentScreen('GAME');
+        navigate(`/game/${gameId}`);
+      },
+      onError: (msg) => setMatchmakingError(msg)
+    });
+
+    const tipTimer = setInterval(() => {
+      setTipIndex((prev) => prev + 1);
+    }, 4500);
+
+    const nodeHopTimer = setInterval(() => {
+      setActiveTargetNode((prev) => {
+        const next = Math.floor(Math.random() * 9);
+        return next === prev ? (next + 1) % 9 : next;
+      });
+    }, 1300);
+
+    return () => {
+      clearInterval(tipTimer);
+      clearInterval(nodeHopTimer);
+      stopSearch();
+    };
+  }, [currentScreen, currentUser, profile.name, profile.points, profile.wins, profile.losses, soundEnabled, navigate]);
+
+  const handleReflexNodeClick = (idx) => {
+    if (idx !== activeTargetNode) return;
+    playAudioEffect('pickup', soundEnabled);
+    setReflexScore((prev) => {
+      const next = prev + 1;
+      if (next > bestReflexScore) {
+        setBestReflexScore(next);
+        try {
+          localStorage.setItem('mlin_queue_best_reflex', String(next));
+        } catch (e) { }
+      }
+      return next;
+    });
+    setActiveTargetNode((prev) => {
+      const next = Math.floor(Math.random() * 9);
+      return next === prev ? (next + 2) % 9 : next;
+    });
+  };
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -330,6 +466,58 @@ export default function App() {
     setCurrentScreen('MAIN_MENU');
   };
 
+  const syncProfileToCloudAndAdmin = async (profData, activeUser = currentUser) => {
+    if (!profData || !profData.name) return;
+    const cleanName = profData.name.trim();
+    const pts = Number(profData.points || 0);
+    const w = Number(profData.wins || 0);
+    const l = Number(profData.losses || 0);
+
+    try {
+      const rawAdmin = localStorage.getItem('mlin_admin_profiles');
+      const list = rawAdmin ? JSON.parse(rawAdmin) : [];
+      const arr = Array.isArray(list) ? list : [];
+      const idx = arr.findIndex(p => p?.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
+      if (idx >= 0) {
+        arr[idx] = {
+          ...arr[idx],
+          name: cleanName,
+          points: pts,
+          rankPoints: pts,
+          wins: w,
+          losses: l,
+          avatar: profData.avatar || arr[idx].avatar
+        };
+      } else {
+        arr.push({
+          id: activeUser?.uid || `user-${Date.now()}`,
+          name: cleanName,
+          points: pts,
+          rankPoints: pts,
+          wins: w,
+          losses: l,
+          avatar: profData.avatar || '🦁'
+        });
+      }
+      localStorage.setItem('mlin_admin_profiles', JSON.stringify(arr));
+    } catch (e) { }
+
+    if (db) {
+      try {
+        const docId = cleanName.toLowerCase();
+        await setDoc(doc(db, 'profiles', docId), {
+          name: cleanName,
+          rankPoints: pts,
+          points: pts,
+          wins: w,
+          losses: l,
+          avatar: profData.avatar || '🦁',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (e) { }
+    }
+  };
+
   const updateProfileAndSave = (updater) => {
     setProfile(prev => {
       const candidate = typeof updater === 'function' ? updater(prev) : updater;
@@ -340,6 +528,8 @@ export default function App() {
         const storageKey = currentUser?.email ? `mlin_user_profile_${currentUser.email}` : 'mlin_user_profile';
         localStorage.setItem(storageKey, JSON.stringify(next));
       } catch (e) { }
+
+      syncProfileToCloudAndAdmin(next, currentUser);
       return next;
     });
   };
@@ -466,6 +656,109 @@ export default function App() {
   const [sortBy, setSortBy] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
 
+  // === KAZNA ZA ODUSTAJANJE (IZLAZ U IZBORNIK ILI PREKID VEZE > 30s) ===
+  const applyAbandonPenalty = (reason = 'QUIT') => {
+    if (abandonHandledRef.current) return;
+    abandonHandledRef.current = true;
+
+    const currentProf = loadSyncedProfile(currentUser?.email);
+    const oldPoints = Number(currentProf.points || 0);
+    const actualLost = Math.min(oldPoints, ABANDON_PENALTY_POINTS);
+    const nextPoints = Math.max(0, oldPoints - ABANDON_PENALTY_POINTS);
+
+    const today = new Date();
+    const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
+
+    const oppDisplayName = isAIMode
+      ? `AI (${aiDifficulty})`
+      : (p2Name || (lang === 'hr' ? 'Protivnik' : 'Opponent'));
+
+    const reasonLabel = reason === 'DISCONNECT'
+      ? (lang === 'hr' ? 'Odustajanje (prekid veze >30s)' : 'Abandon (disconnect >30s)')
+      : (lang === 'hr' ? 'Odustajanje (izlazak)' : 'Abandon (quit)');
+
+    const penaltyMatch = {
+      player: currentProf.name || profile.name,
+      vs: `${oppDisplayName} — ${reasonLabel}`,
+      isWin: false,
+      score: `-${actualLost} ${t.ptsUnit}`,
+      date: dateStr,
+      category: gameCategory
+    };
+
+    const updatedProf = evaluateGameAvatars({
+      ...currentProf,
+      points: nextPoints,
+      losses: Number(currentProf.losses || 0) + 1,
+      matchHistory: [penaltyMatch, ...(currentProf.matchHistory || []).slice(0, 19)]
+    });
+
+    updateProfileAndSave(updatedProf);
+    saveMatchHistory(penaltyMatch);
+    playAudioEffect('defeat', soundEnabled);
+
+    const bannerMsg = reason === 'DISCONNECT'
+      ? (lang === 'hr'
+        ? `⚠️ Veza je bila prekinuta više od ${OFFLINE_ABANDON_SECONDS}s. Primijenjena je kazna: -${actualLost} bodova.`
+        : `⚠️ Connection was lost for over ${OFFLINE_ABANDON_SECONDS}s. Abandon penalty applied: -${actualLost} points.`)
+      : (lang === 'hr'
+        ? `⚠️ Napustili ste aktivan meč. Kazna za odustajanje: -${actualLost} bodova.`
+        : `⚠️ You left an active match. Abandon penalty: -${actualLost} points.`);
+
+    setAbandonBanner(bannerMsg);
+    setDisconnectSeconds(0);
+    setWinner(null);
+    setMatchSummary(null);
+    setSelectedNode(null);
+    setActiveHeldPiece(null);
+    setCurrentScreen('MAIN_MENU');
+    if (onlineGameId) {
+      navigate('/');
+    }
+  };
+
+  useEffect(() => {
+    const isActiveMatch = currentScreen === 'GAME' && setupStep === 'PLAY' && !winner;
+    if (!isActiveMatch) {
+      setDisconnectSeconds(0);
+      return;
+    }
+
+    let isOfflineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (isOfflineNow) setDisconnectSeconds(1);
+
+    const handleOffline = () => {
+      isOfflineNow = true;
+      setDisconnectSeconds(1);
+    };
+    const handleOnline = () => {
+      isOfflineNow = false;
+      setDisconnectSeconds(0);
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    const interval = setInterval(() => {
+      if (isOfflineNow) {
+        setDisconnectSeconds((prev) => {
+          const next = prev + 1;
+          if (next >= OFFLINE_ABANDON_SECONDS) {
+            clearInterval(interval);
+            applyAbandonPenalty('DISCONNECT');
+          }
+          return next;
+        });
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [currentScreen, setupStep, winner, isAIMode, p2Name, aiDifficulty, gameCategory, lang, soundEnabled, currentUser, profile.name, onlineGameId]);
+
   const handleExportProfilePDF = () => {
     exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog), lang);
   };
@@ -479,6 +772,12 @@ export default function App() {
 
   useEffect(() => {
     if (onlineGameId) {
+      onlineRewardProcessedRef.current = null;
+      latestOnlineGameDataRef.current = null;
+      abandonHandledRef.current = false;
+      setDisconnectSeconds(0);
+      setWinner(null);
+      setMatchSummary(null);
       setIsAIMode(false);
       setCurrentScreen('GAME');
       setSetupStep('PLAY');
@@ -490,13 +789,11 @@ export default function App() {
     const unsubscribe = onSnapshot(doc(db, "games", onlineGameId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        latestOnlineGameDataRef.current = data;
         if (data.board) setBoard(data.board);
         if (data.currentTurn) setTurn(data.currentTurn);
         if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
         if (data.unplaced) setUnplaced(data.unplaced);
-        if (data.winner && !winner) {
-          handleGameEnd(data.winner, true);
-        }
         if (data.playerWhite && data.playerBlack) {
           const whiteName = typeof data.playerWhite === 'object' ? (data.playerWhite.name || 'Bijeli') : data.playerWhite;
           const blackName = typeof data.playerBlack === 'object' ? (data.playerBlack.name || 'Crni') : data.playerBlack;
@@ -506,11 +803,24 @@ export default function App() {
           });
           setP1Name(whiteName);
           setP2Name(blackName);
+
+          const localNameClean = (profile.name || '').trim().toLowerCase();
+          const iAmWhite = typeof data.playerWhite === 'object' && data.playerWhite?.name?.trim().toLowerCase() === localNameClean;
+          const oppObj = iAmWhite ? data.playerBlack : data.playerWhite;
+          if (oppObj && typeof oppObj === 'object') {
+            setOnlineOpponentStats({
+              wins: Number(oppObj.wins || 0),
+              losses: Number(oppObj.losses || 0)
+            });
+          }
+        }
+        if (data.winner && onlineRewardProcessedRef.current !== onlineGameId) {
+          handleGameEnd(data.winner, true, data);
         }
       }
     });
     return () => unsubscribe();
-  }, [onlineGameId, winner]);
+  }, [onlineGameId, profile.name]);
 
   useEffect(() => {
     const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
@@ -592,8 +902,56 @@ export default function App() {
   }, [currentScreen, setupStep, winner, isAIMode, onlineGameId, myColor, turn, aiColor, keyboardFocusNode]);
 
   const fetchLeaderboard = async () => {
-    const data = await getLeaderboard();
-    setLeaderboard(data);
+    const liveProf = loadSyncedProfile(currentUser?.email);
+    setProfile(liveProf);
+    await syncProfileToCloudAndAdmin(liveProf, currentUser);
+
+    let remoteList = [];
+    try {
+      const data = await getLeaderboard();
+      if (Array.isArray(data)) remoteList = data;
+    } catch (e) { }
+
+    let localAdminList = [];
+    try {
+      const rawAdmin = localStorage.getItem('mlin_admin_profiles');
+      if (rawAdmin) {
+        const parsed = JSON.parse(rawAdmin);
+        if (Array.isArray(parsed)) localAdminList = parsed;
+      }
+    } catch (e) { }
+
+    const mergedMap = new Map();
+
+    const upsertPlayer = (entry) => {
+      if (!entry || !entry.name) return;
+      const key = entry.name.trim().toLowerCase();
+      const entryPts = Number(entry.rankPoints ?? entry.points ?? 0);
+      const existing = mergedMap.get(key);
+      if (!existing || entryPts > existing.rankPoints) {
+        mergedMap.set(key, {
+          name: entry.name.trim(),
+          rankPoints: entryPts,
+          wins: Number(entry.wins ?? existing?.wins ?? 0),
+          losses: Number(entry.losses ?? existing?.losses ?? 0)
+        });
+      }
+    };
+
+    remoteList.forEach(upsertPlayer);
+    localAdminList.forEach(upsertPlayer);
+    upsertPlayer({
+      name: liveProf.name,
+      rankPoints: Number(liveProf.points || 0),
+      wins: Number(liveProf.wins || 0),
+      losses: Number(liveProf.losses || 0)
+    });
+
+    const sortedTop100 = Array.from(mergedMap.values())
+      .sort((a, b) => b.rankPoints - a.rankPoints)
+      .slice(0, 100);
+
+    setLeaderboard(sortedTop100);
   };
 
   const totalMatches = profile.wins + profile.losses;
@@ -631,6 +989,8 @@ export default function App() {
   };
 
   const startCouchGame = () => {
+    abandonHandledRef.current = false;
+    setAbandonBanner('');
     setIsAIMode(false);
     setBoard(Array(24).fill(null));
     setTurn('WHITE');
@@ -651,6 +1011,8 @@ export default function App() {
   };
 
   const startAIGame = (difficulty) => {
+    abandonHandledRef.current = false;
+    setAbandonBanner('');
     setIsAIMode(true);
     setAiDifficulty(difficulty);
     setAiColor('BLACK');
@@ -868,11 +1230,88 @@ export default function App() {
     };
   };
 
-  const handleGameEnd = (winningColor, fromSnapshot = false) => {
+  const handleGameEnd = (winningColor, fromSnapshot = false, onlineGameData = null) => {
     setWinner(winningColor);
 
-    if (onlineGameId && !fromSnapshot) {
-      updateDoc(doc(db, "games", onlineGameId), { winner: winningColor });
+    const gData = onlineGameData || latestOnlineGameDataRef.current;
+
+    if (onlineGameId) {
+      if (onlineRewardProcessedRef.current === onlineGameId) return;
+      onlineRewardProcessedRef.current = onlineGameId;
+
+      if (!fromSnapshot) {
+        updateDoc(doc(db, "games", onlineGameId), { winner: winningColor }).catch(() => {});
+      }
+
+      const whiteObj = gData?.playerWhite;
+      const blackObj = gData?.playerBlack;
+      const whiteName = (typeof whiteObj === 'object' ? whiteObj?.name : whiteObj) || players.WHITE?.name || 'Bijeli';
+      const blackName = (typeof blackObj === 'object' ? blackObj?.name : blackObj) || players.BLACK?.name || 'Crni';
+
+      const currentLocalProf = loadSyncedProfile(currentUser?.email);
+      const localNameClean = (currentLocalProf.name || profile.name || '').trim().toLowerCase();
+
+      const resolvedMyColor =
+        myColor ||
+        sessionStorage.getItem('mlin_my_color') ||
+        (whiteName.trim().toLowerCase() === localNameClean
+          ? 'WHITE'
+          : (blackName.trim().toLowerCase() === localNameClean ? 'BLACK' : 'WHITE'));
+
+      const oppColor = resolvedMyColor === 'WHITE' ? 'BLACK' : 'WHITE';
+      const oppName = oppColor === 'WHITE' ? whiteName : blackName;
+      const oppObj = oppColor === 'WHITE' ? whiteObj : blackObj;
+      const oppPoints = Number(typeof oppObj === 'object' ? (oppObj?.points || 0) : 0);
+      const oppWins = Number(typeof oppObj === 'object' ? (oppObj?.wins || 0) : 0);
+      const oppLosses = Number(typeof oppObj === 'object' ? (oppObj?.losses || 0) : 0);
+
+      const isLocalWinner = winningColor === resolvedMyColor;
+      playAudioEffect(isLocalWinner ? 'victory' : 'defeat', soundEnabled);
+
+      const localBaseProfile = {
+        ...currentLocalProf,
+        name: currentLocalProf.name || profile.name || p1Name
+      };
+      const localResult = computePlayerExperience(
+        localBaseProfile,
+        isLocalWinner,
+        resolvedMyColor,
+        oppName,
+        false,
+        lang
+      );
+
+      updateProfileAndSave(localResult.updatedProfile);
+      saveMatchHistory(localResult.newMatch);
+
+      const oppDelta = !isLocalWinner ? 12 : -6;
+      const oppFinalPoints = Math.max(0, oppPoints + oppDelta);
+
+      setMatchSummary({
+        isAIMode: false,
+        aiDifficulty,
+        winnerName: winningColor === 'WHITE' ? whiteName : blackName,
+        leftPlayer: localResult.summary,
+        rightPlayer: {
+          name: oppName,
+          avatar: '🦊',
+          isWin: !isLocalWinner,
+          baseDelta: oppDelta,
+          millBonus: 0,
+          domBonus: 0,
+          achievementBonusPoints: 0,
+          totalPointChange: oppDelta,
+          finalPoints: oppFinalPoints,
+          rankName: getRankName(oppFinalPoints, lang),
+          titleWins: !isLocalWinner ? oppWins + 1 : oppWins,
+          titleLosses: isLocalWinner ? oppLosses + 1 : oppLosses,
+          newAchievements: [],
+          newAvatars: [],
+          mills: 0,
+          captured: 0
+        }
+      });
+      return;
     }
 
     const p1ColorActual = players.WHITE.id === 1 ? 'WHITE' : 'BLACK';
@@ -1085,6 +1524,24 @@ export default function App() {
   const p1CapturedCount = captured[p1Color] || 0;
   const p2CapturedCount = captured[p2Color] || 0;
 
+  const getStatsForSide = (sideColor, sideName) => {
+    if (onlineGameId) {
+      const localNameClean = (profile.name || '').trim().toLowerCase();
+      const sideNameClean = (sideName || '').trim().toLowerCase();
+      if (sideNameClean === localNameClean) {
+        return { wins: profile.wins, losses: profile.losses };
+      }
+      return onlineOpponentStats;
+    }
+    if (isAIMode && players[sideColor]?.id === 2) {
+      return {
+        wins: aiDifficulty === 'HARD' ? 200 : aiDifficulty === 'MEDIUM' ? 75 : 10,
+        losses: 0
+      };
+    }
+    return getPlayerWinsLossesByName(sideName, profile);
+  };
+
   const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
@@ -1206,7 +1663,6 @@ export default function App() {
     );
   };
 
-  // === PROVJERA JE LI KORISNIK PRIJAVLJEN (AUTH EKRAN SA ZLATNIM OKVIROM I IZBOROM JEZIKA) ===
   if (authLoading) {
     return <div className="game-container" style={{ color: '#fff', textAlign: 'center', paddingTop: '20vh' }}>Učitavanje...</div>;
   }
@@ -1218,7 +1674,6 @@ export default function App() {
           maxWidth: '400px', width: '90%', background: '#0f172a', border: '2px solid #d4af37',
           borderRadius: '16px', padding: '24px', boxShadow: '0 12px 40px rgba(0,0,0,0.7)', color: '#f8fafc', position: 'relative'
         }}>
-          {/* ODABIR JEZIKA U GORNJEM DESNOM KUTU */}
           <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '4px' }}>
             <button className={`lang-btn ${lang === 'hr' ? 'active' : ''}`} onClick={() => setLang('hr')} style={{ padding: '2px 6px', fontSize: '0.7rem' }}>HR</button>
             <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={() => setLang('en')} style={{ padding: '2px 6px', fontSize: '0.7rem' }}>EN</button>
@@ -1228,7 +1683,6 @@ export default function App() {
             {authMode === 'LOGIN' ? (lang === 'hr' ? '🔐 Prijava u Mlin' : '🔐 Sign in to Mill') : (lang === 'hr' ? '📝 Registracija' : '📝 Register')}
           </h2>
 
-          {/* GOOGLE LOGIN GUMB */}
           <button
             type="button"
             onClick={handleGoogleLogin}
@@ -1306,7 +1760,6 @@ export default function App() {
         setActiveHeldPiece(null);
       }
     }}>
-      {/* MODAL ZA UNOS NADIMKA KOD PRVE REGISTRACIJE */}
       {showNicknameModal && (
         <div style={{
           position: 'fixed', inset: 0, backgroundColor: 'rgba(6, 11, 22, 0.9)', backdropFilter: 'blur(8px)',
@@ -1369,6 +1822,23 @@ export default function App() {
       {/* 1. GLAVNI IZBORNIK */}
       {currentScreen === 'MAIN_MENU' && (
         <div className="menu-card menu-card-wide" onClick={(e) => e.stopPropagation()}>
+          {abandonBanner && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.14)', border: '1px solid #ef4444', color: '#fca5a5',
+              padding: '10px 14px', borderRadius: '10px', marginBottom: '14px', fontSize: '0.82rem',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px'
+            }}>
+              <span>{abandonBanner}</span>
+              <button
+                type="button"
+                onClick={() => setAbandonBanner('')}
+                style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="menu-header">
             <h1
               className="menu-title"
@@ -1394,7 +1864,9 @@ export default function App() {
             }}>{t.profile}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('AI_SETUP')}>{t.playAI}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('RANKING')}>{t.ranking}</button>
-            <button className="btn-menu" disabled>{t.playOnline}</button>
+            <button className="btn-menu" onClick={() => setCurrentScreen('ONLINE_SEARCH')}>
+              {lang === 'hr' ? '🌐 Igraj Na Mreži' : '🌐 Play Online'}
+            </button>
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
             <button className="btn-menu" onClick={() => {
@@ -1416,6 +1888,103 @@ export default function App() {
               {lang === 'hr' ? 'Odjavi se' : 'Log out'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ONLINE MATCHMAKING LOADING EKRAN */}
+      {currentScreen === 'ONLINE_SEARCH' && (
+        <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px', width: '92%', textAlign: 'center' }}>
+          <h2 className="menu-title" style={{ marginBottom: '6px' }}>
+            {lang === 'hr' ? '🌐 Traženje Protivnika' : '🌐 Finding Opponent'}
+          </h2>
+
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '12px 0' }}>
+            <svg width="84" height="84" viewBox="0 0 84 84">
+              <circle cx="42" cy="42" r="36" fill="none" stroke="rgba(56, 189, 248, 0.2)" strokeWidth="2" />
+              <circle cx="42" cy="42" r="24" fill="none" stroke="rgba(251, 191, 36, 0.25)" strokeWidth="1.5" strokeDasharray="4 4" />
+              <rect x="20" y="20" width="44" height="44" rx="6" fill="none" stroke="#d4af37" strokeWidth="1.5" opacity="0.7" />
+              <g style={{ transformOrigin: '42px 42px', animation: 'spin 3.2s linear infinite' }}>
+                <line x1="42" y1="42" x2="42" y2="6" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+                <circle cx="42" cy="8" r="3.5" fill="#fbbf24" />
+              </g>
+              <circle cx="42" cy="42" r="5" fill="#fbbf24" />
+            </svg>
+          </div>
+
+          <p style={{ color: '#cbd5e1', fontSize: '0.88rem', margin: '4px 0' }}>
+            {lang === 'hr' ? 'Vaš rang:' : 'Your rank:'}{' '}
+            <strong style={{ color: '#fce055' }}>{getRankName(profile.points, lang)}</strong>
+          </p>
+
+          <p style={{ color: '#94a3b8', fontSize: '0.8rem', margin: '4px 0 10px 0' }}>
+            {matchmakingInfo.allowedDiff >= 999
+              ? (lang === 'hr' ? 'Širim pretragu na sve dostupne rangove...' : 'Expanding search across all available ranks...')
+              : (lang === 'hr'
+                  ? `Dopuštena razlika u rangu: ±${matchmakingInfo.allowedDiff}`
+                  : `Allowed rank difference: ±${matchmakingInfo.allowedDiff}`)}
+          </p>
+
+          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#38bdf8', fontFamily: 'monospace', marginBottom: '12px' }}>
+            {matchmakingInfo.seconds}s
+          </div>
+
+          <div style={{
+            background: '#071524', border: '1px solid #334155', borderRadius: '12px',
+            padding: '12px', marginBottom: '12px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '8px' }}>
+              <span>⚡ {lang === 'hr' ? 'Zagrijavanje refleksa (klikni zlatni čvor)' : 'Reflex warm-up (tap the gold node)'}</span>
+              <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>
+                {reflexScore} | {lang === 'hr' ? 'Rekord' : 'Best'}: {bestReflexScore}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', maxWidth: '170px', margin: '0 auto' }}>
+              {Array.from({ length: 9 }).map((_, idx) => {
+                const isHot = idx === activeTargetNode;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleReflexNodeClick(idx)}
+                    style={{
+                      height: '38px',
+                      borderRadius: '8px',
+                      border: isHot ? '2px solid #fde047' : '1px solid #1e293b',
+                      background: isHot ? 'radial-gradient(circle, #fbbf24 0%, #b45309 100%)' : '#0f172a',
+                      boxShadow: isHot ? '0 0 12px rgba(251, 191, 36, 0.75)' : 'none',
+                      cursor: isHot ? 'pointer' : 'default',
+                      transition: 'all 0.15s ease'
+                    }}
+                    aria-label={`Node ${idx + 1}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{
+            background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: '8px', padding: '8px 10px', fontSize: '0.76rem', color: '#e2e8f0',
+            minHeight: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px'
+          }}>
+            {MATCHMAKING_TIPS[lang][tipIndex % MATCHMAKING_TIPS[lang].length]}
+          </div>
+
+          {matchmakingError && (
+            <div style={{ color: '#ef4444', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '10px' }}>
+              ⚠️ {matchmakingError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="btn-menu btn-back"
+            style={{ width: '100%', margin: 0 }}
+            onClick={() => setCurrentScreen('MAIN_MENU')}
+          >
+            {t.back}
+          </button>
         </div>
       )}
 
@@ -1823,7 +2392,7 @@ export default function App() {
 
       {/* POSTIGNUĆA */}
       {currentScreen === 'ACHIEVEMENTS' && (
-        <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="menu-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', width: '95%', display: 'flex', flexDirection: 'column' }}>
           {(() => {
             const liveProfile = loadSyncedProfile(currentUser?.email);
             const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
@@ -1831,14 +2400,14 @@ export default function App() {
 
             return (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
                   <h2 className="menu-title" style={{ margin: 0 }}>{t.achievementsMenu}</h2>
                   <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 'bold' }}>
                     {t.unlocked}: {userAchs.length} / {fullCat.length}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
                   {[
                     { id: 'ALL', label: t.all },
                     { id: 'UNLOCKED', label: t.unlocked },
@@ -1857,7 +2426,7 @@ export default function App() {
                   ))}
                 </div>
 
-                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                <div style={{ maxHeight: '50vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                   {fullCat
                     .filter(rawAch => {
                       const isUnlocked = userAchs.includes(String(rawAch.id).trim());
@@ -1902,7 +2471,14 @@ export default function App() {
               </>
             );
           })()}
-          <button type="button" className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')} style={{ marginTop: '14px' }}>{t.back}</button>
+          <button
+            type="button"
+            className="btn-menu btn-back"
+            onClick={() => setCurrentScreen('MAIN_MENU')}
+            style={{ marginTop: '14px', flexShrink: 0 }}
+          >
+            {t.back}
+          </button>
         </div>
       )}
 
@@ -1985,6 +2561,17 @@ export default function App() {
           {setupStep === 'PLAY' && (
             <>
               <div className="status-bar" onClick={(e) => e.stopPropagation()}>
+                {disconnectSeconds > 0 && !winner && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', color: '#fca5a5',
+                    padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '8px'
+                  }}>
+                    {lang === 'hr'
+                      ? `⚠️ Prekinuta veza! Kazna za odustajanje za ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} bodova)`
+                      : `⚠️ Connection lost! Abandon penalty in ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} points)`}
+                  </div>
+                )}
+
                 {winner ? (
                   <div className="status-turn" style={{ color: '#4ade80' }}>{t.gameOverWinner} {players[winner].name}!</div>
                 ) : (
@@ -2005,7 +2592,18 @@ export default function App() {
                     )}
                   </>
                 )}
-                <button className="btn-menu btn-back" style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }} onClick={() => setCurrentScreen('MAIN_MENU')}>
+                <button
+                  className="btn-menu btn-back"
+                  style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }}
+                  onClick={() => {
+                    if (!winner) {
+                      applyAbandonPenalty('QUIT');
+                    } else {
+                      setCurrentScreen('MAIN_MENU');
+                      if (onlineGameId) navigate('/');
+                    }
+                  }}
+                >
                   {t.btnQuit}
                 </button>
               </div>
@@ -2020,10 +2618,7 @@ export default function App() {
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title">{p1Name}</div>
                   {(() => {
-                    const isP1AI = isAIMode && players[p1Color]?.id === 2;
-                    const p1Stats = isP1AI
-                      ? { wins: aiDifficulty === 'HARD' ? 200 : aiDifficulty === 'MEDIUM' ? 75 : 10, losses: 0 }
-                      : getPlayerWinsLossesByName(p1Name, profile);
+                    const p1Stats = getStatsForSide(p1Color, p1Name);
                     const titleText = getPlayerTitle(p1Stats.wins, p1Stats.losses, lang);
                     const tierClass = getPlayerTitleTierClass(p1Stats.wins, p1Stats.losses);
 
@@ -2080,10 +2675,7 @@ export default function App() {
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
                   {(() => {
-                    const isP2AI = isAIMode && players[p2Color]?.id === 2;
-                    const p2Stats = isP2AI
-                      ? { wins: aiDifficulty === 'HARD' ? 200 : aiDifficulty === 'MEDIUM' ? 75 : 10, losses: 0 }
-                      : getPlayerWinsLossesByName(p2Name, profile);
+                    const p2Stats = getStatsForSide(p2Color, p2Name);
                     const titleText = getPlayerTitle(p2Stats.wins, p2Stats.losses, lang);
                     const tierClass = getPlayerTitleTierClass(p2Stats.wins, p2Stats.losses);
 
