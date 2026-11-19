@@ -840,3 +840,71 @@ body {
   }
 }
 
+/* === OKVIRI ZA TITULE (TIER 1 - TIER 25) === */
+.custom-title-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  position: relative;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+/* TIER 1-5: Osnovni i skromni */
+.title-tier-1 { background: #0f172a; border: 1px solid #475569; color: #94a3b8; }
+.title-tier-2 { background: #111827; border: 1px solid #64748b; color: #cbd5e1; }
+.title-tier-3 { background: #1c1917; border: 1px solid #78350f; color: #d6d3d1; }
+.title-tier-4 { background: #1e1b18; border: 1.5px solid #92400e; color: #fde68a; }
+.title-tier-5 { background: #0f172a; border: 1.5px solid #0284c7; color: #bae6fd; box-shadow: 0 0 6px rgba(2, 132, 199, 0.25); }
+
+/* TIER 6-10: Kovani metali i prvi odsjaji */
+.title-tier-6 { background: linear-gradient(135deg, #0f172a, #1e293b); border: 1.5px solid #38bdf8; color: #e0f2fe; box-shadow: 0 0 8px rgba(56, 189, 248, 0.3); }
+.title-tier-7 { background: linear-gradient(135deg, #1e293b, #334155); border: 1.5px solid #94a3b8; color: #f8fafc; box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.1), 0 0 8px rgba(148, 163, 184, 0.35); }
+.title-tier-8 { background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #cbd5e1; color: #ffffff; box-shadow: 0 0 10px rgba(203, 213, 225, 0.45); border-radius: 12px; }
+.title-tier-9 { background: linear-gradient(135deg, #27272a, #18181b); border: 2px solid #d97706; color: #fcd34d; box-shadow: 0 0 11px rgba(217, 119, 6, 0.45); }
+.title-tier-10 { background: linear-gradient(135deg, #064e3b, #022c22); border: 2px solid #10b981; color: #a7f3d0; box-shadow: 0 0 12px rgba(16, 185, 129, 0.45); }
+
+/* TIER 11-15: Dragulji i ratnički pečati */
+.title-tier-11 { background: linear-gradient(135deg, #065f46, #064e3b); border: 2px solid #34d399; color: #ecfdf5; box-shadow: inset 0 0 8px rgba(52, 211, 153, 0.3), 0 0 14px rgba(16, 185, 129, 0.55); }
+.title-tier-12 { background: linear-gradient(135deg, #1e3a8a, #172554); border: 2px solid #60a5fa; color: #dbeafe; box-shadow: 0 0 15px rgba(59, 130, 246, 0.6); }
+.title-tier-13 { background: linear-gradient(135deg, #312e81, #1e1b4b); border: 2px solid #818cf8; color: #e0e7ff; box-shadow: 0 0 16px rgba(99, 102, 241, 0.65); }
+.title-tier-14 { background: linear-gradient(135deg, #4c1d95, #2e1065); border: 2px solid #a78bfa; color: #f3e8ff; box-shadow: 0 0 16px rgba(139, 92, 246, 0.65); }
+.title-tier-15 { background: linear-gradient(135deg, #7f1d1d, #450a0a); border: 2px solid #f87171; color: #fee2e2; box-shadow: 0 0 18px rgba(239, 68, 68, 0.7); }
+
+/* TIER 16-20: Kraljevski i plameni okviri */
+.title-tier-16 { background: linear-gradient(135deg, #78350f, #451a03); border: 2px solid #fbbf24; color: #fef3c7; box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.4), 0 0 18px rgba(245, 158, 11, 0.75); }
+.title-tier-17 { background: linear-gradient(135deg, #831843, #500724); border: 2px solid #f472b6; color: #fce7f3; box-shadow: 0 0 20px rgba(236, 72, 153, 0.75); }
+.title-tier-18 { background: linear-gradient(135deg, #92400e, #78350f, #451a03); border: 2.5px solid #fde047; color: #ffffff; box-shadow: 0 0 22px rgba(253, 224, 71, 0.85); outline: 1px solid rgba(253, 224, 71, 0.4); outline-offset: 2px; }
+.title-tier-19 { background: linear-gradient(135deg, #991b1b, #7f1d1d); border: 2.5px solid #fb923c; color: #ffedd5; box-shadow: 0 0 24px rgba(249, 115, 22, 0.85); animation: tier-pulse-orange 2.2s infinite alternate; }
+.title-tier-20 { background: linear-gradient(135deg, #581c87, #3b0764); border: 2.5px solid #e879f9; color: #fdf4ff; box-shadow: 0 0 25px rgba(217, 70, 239, 0.85); outline: 1px solid #e879f9; outline-offset: 2px; }
+
+/* TIER 21-25: Zastrašujući animirani vrh */
+.title-tier-21 { background: linear-gradient(135deg, #0c4a6e, #082f49); border: 2.5px solid #22d3ee; color: #cffafe; box-shadow: 0 0 26px rgba(34, 211, 238, 0.9); animation: tier-pulse-cyan 1.8s infinite alternate; }
+.title-tier-22 { background: linear-gradient(135deg, #701a75, #4a044e); border: 2.5px solid #f0abfc; color: #ffffff; box-shadow: inset 0 0 12px #f0abfc, 0 0 28px rgba(240, 171, 252, 0.9); }
+.title-tier-23 { background: linear-gradient(135deg, #09090b, #450a0a); border: 2.5px solid #ef4444; color: #fca5a5; box-shadow: 0 0 30px rgba(220, 38, 38, 0.95); outline: 1.5px solid #ef4444; outline-offset: 2px; animation: tier-pulse-red 1.5s infinite alternate; }
+.title-tier-24 { background: linear-gradient(135deg, #451a03, #7f1d1d, #1e1b4b); border: 3px solid #facc15; color: #fef08a; box-shadow: 0 0 32px rgba(250, 204, 21, 0.95), inset 0 0 12px rgba(239, 68, 68, 0.8); animation: tier-pulse-gold 1.4s infinite alternate; }
+.title-tier-25 {
+  background: linear-gradient(270deg, #1e1b4b, #4c0519, #422006, #0f172a);
+  background-size: 400% 400%;
+  border: 3px solid #fde047;
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(253, 224, 71, 0.9);
+  box-shadow: 0 0 35px rgba(253, 224, 71, 0.95), 0 0 15px rgba(239, 68, 68, 0.9);
+  outline: 2px solid rgba(253, 224, 71, 0.6);
+  outline-offset: 3px;
+  animation: cosmic-shift 4s ease infinite, tier-pulse-gold 1.2s infinite alternate;
+}
+
+@keyframes tier-pulse-orange { 0% { box-shadow: 0 0 14px rgba(249, 115, 22, 0.6); } 100% { box-shadow: 0 0 26px rgba(249, 115, 22, 1); } }
+@keyframes tier-pulse-cyan { 0% { box-shadow: 0 0 15px rgba(34, 211, 238, 0.65); } 100% { box-shadow: 0 0 28px rgba(34, 211, 238, 1); } }
+@keyframes tier-pulse-red { 0% { box-shadow: 0 0 18px rgba(239, 68, 68, 0.7); } 100% { box-shadow: 0 0 34px rgba(239, 68, 68, 1); } }
+@keyframes tier-pulse-gold { 0% { box-shadow: 0 0 20px rgba(250, 204, 21, 0.75); } 100% { box-shadow: 0 0 38px rgba(250, 204, 21, 1); } }
+@keyframes cosmic-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }

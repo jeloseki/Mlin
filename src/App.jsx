@@ -10,13 +10,13 @@ import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboar
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 // === FIREBASE AUTH UVOZ ===
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
-  signInWithPopup 
+  signInWithPopup
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 // ==========================
@@ -28,6 +28,7 @@ import { getStoredBoards, getLocalizedBoardName } from './boardsData';
 import { TRANSLATIONS } from './translations';
 // === ZOD UVOZ ===
 import { profileSchema, playerNameSchema, authSchema } from './validators';
+import { getPlayerTitle, getPlayerTitleTierClass } from './titlesData';
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -196,6 +197,38 @@ const loadFullAchievementsCatalog = (extraList = []) => {
   return Array.from(map.values());
 };
 
+const getPlayerWinsLossesByName = (playerName, currentProf) => {
+  if (!playerName) return { wins: 0, losses: 0 };
+  const cleanName = playerName.trim().toLowerCase();
+
+  if (currentProf?.name && currentProf.name.trim().toLowerCase() === cleanName) {
+    return {
+      wins: Number(currentProf.wins || 0),
+      losses: Number(currentProf.losses || 0)
+    };
+  }
+
+  try {
+    const rawAdmin = localStorage.getItem('mlin_admin_profiles');
+    if (rawAdmin) {
+      const adminList = JSON.parse(rawAdmin);
+      if (Array.isArray(adminList)) {
+        const found = adminList.find(
+          p => p?.name && p.name.trim().toLowerCase() === cleanName
+        );
+        if (found) {
+          return {
+            wins: Number(found.wins || 0),
+            losses: Number(found.losses || 0)
+          };
+        }
+      }
+    }
+  } catch (e) { }
+
+  return { wins: 0, losses: 0 };
+};
+
 export default function App() {
   const location = useLocation();
   const onlineGameId = location.pathname.startsWith('/game/')
@@ -216,7 +249,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
-  const [authMode, setAuthMode] = useState('LOGIN'); 
+  const [authMode, setAuthMode] = useState('LOGIN');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -248,7 +281,7 @@ export default function App() {
         const userEmailKey = user.email;
         const loadedProf = loadSyncedProfile(userEmailKey);
         const hasExistingSavedData = localStorage.getItem(`mlin_user_profile_${userEmailKey}`);
-        
+
         setProfile(loadedProf);
 
         if (!hasExistingSavedData) {
@@ -825,6 +858,8 @@ export default function App() {
         totalPointChange,
         finalPoints: finalProf.points || 0,
         rankName: getRankName(finalProf.points || 0, lang),
+        titleWins: Number(finalProf.wins || 0),
+        titleLosses: Number(finalProf.losses || 0),
         newAchievements: newAchObjects,
         newAvatars: newAvObjects,
         mills: millsCount[playerColor] || 0,
@@ -1075,6 +1110,15 @@ export default function App() {
                 <span>{pData.name}</span>
                 {pData.isWin && <span title="Pobjednik">👑</span>}
               </div>
+              {(() => {
+                const titleText = getPlayerTitle(pData.titleWins ?? 0, pData.titleLosses ?? 0, lang);
+                const tierClass = getPlayerTitleTierClass(pData.titleWins ?? 0, pData.titleLosses ?? 0);
+                return (
+                  <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.62rem', padding: '2px 8px', marginTop: '4px' }}>
+                    <span>{titleText}</span>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px', backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000' }}>
@@ -1450,7 +1494,15 @@ export default function App() {
               </h2>
             )}
 
-            <span className="profile-title-tag">{t.defaultTitle}</span>
+            {(() => {
+              const titleText = getPlayerTitle(profile.wins, profile.losses, lang);
+              const tierClass = getPlayerTitleTierClass(profile.wins, profile.losses);
+              return (
+                <div className={`custom-title-frame ${tierClass}`} style={{ margin: '6px 0' }}>
+                  <span>{titleText}</span>
+                </div>
+              );
+            })()}
 
             <input
               className="bio-input" value={profile.bio} maxLength={40} placeholder={lang === 'hr' ? "Upišite status poruku..." : "Enter status message..."}
@@ -1967,6 +2019,20 @@ export default function App() {
 
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title">{p1Name}</div>
+                  {(() => {
+                    const isP1AI = isAIMode && players[p1Color]?.id === 2;
+                    const p1Stats = isP1AI
+                      ? { wins: aiDifficulty === 'HARD' ? 200 : aiDifficulty === 'MEDIUM' ? 75 : 10, losses: 0 }
+                      : getPlayerWinsLossesByName(p1Name, profile);
+                    const titleText = getPlayerTitle(p1Stats.wins, p1Stats.losses, lang);
+                    const tierClass = getPlayerTitleTierClass(p1Stats.wins, p1Stats.losses);
+
+                    return (
+                      <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', marginBottom: '8px' }}>
+                        <span>{titleText}</span>
+                      </div>
+                    );
+                  })()}
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p1Color];
@@ -2013,6 +2079,20 @@ export default function App() {
 
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
                   <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
+                  {(() => {
+                    const isP2AI = isAIMode && players[p2Color]?.id === 2;
+                    const p2Stats = isP2AI
+                      ? { wins: aiDifficulty === 'HARD' ? 200 : aiDifficulty === 'MEDIUM' ? 75 : 10, losses: 0 }
+                      : getPlayerWinsLossesByName(p2Name, profile);
+                    const titleText = getPlayerTitle(p2Stats.wins, p2Stats.losses, lang);
+                    const tierClass = getPlayerTitleTierClass(p2Stats.wins, p2Stats.losses);
+
+                    return (
+                      <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', marginBottom: '8px' }}>
+                        <span>{titleText}</span>
+                      </div>
+                    );
+                  })()}
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p2Color];
