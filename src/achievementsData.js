@@ -3,12 +3,18 @@ import { db } from './firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 export const ACHIEVEMENT_TIERS = {
-  BRONZE: { label: 'Bronca', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' },
-  SILVER: { label: 'Srebro', color: '#cbd5e1', bg: 'rgba(203, 213, 225, 0.15)', border: '#94a3b8' },
-  GOLD: { label: 'Zlato', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', border: '#f59e0b' },
-  PLATINUM: { label: 'Platina', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', border: '#0ea5e9' },
-  LEGENDARY: { label: 'Legenda', color: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', border: '#db2777' },
-  SHAME: { label: 'Gaf / Peh', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#dc2726' }
+  BRONZE: { label: 'Bronca', hr: 'Bronca', en: 'Bronze', color: '#cd7f32', bg: 'rgba(205, 127, 50, 0.15)', border: '#cd7f32' },
+  SILVER: { label: 'Srebro', hr: 'Srebro', en: 'Silver', color: '#cbd5e1', bg: 'rgba(203, 213, 225, 0.15)', border: '#94a3b8' },
+  GOLD: { label: 'Zlato', hr: 'Zlato', en: 'Gold', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', border: '#f59e0b' },
+  PLATINUM: { label: 'Platina', hr: 'Platina', en: 'Platinum', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)', border: '#0ea5e9' },
+  LEGENDARY: { label: 'Legenda', hr: 'Legenda', en: 'Legendary', color: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', border: '#db2777' },
+  SHAME: { label: 'Peh', hr: 'Peh', en: 'Blunder', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#dc2726' }
+};
+
+export const getLocalizedTierLabel = (tierKey, lang = 'hr') => {
+  const tier = ACHIEVEMENT_TIERS?.[tierKey];
+  if (!tier) return lang === 'en' ? 'Bronze' : 'Bronca';
+  return lang === 'en' ? (tier.en || tier.label) : (tier.hr || tier.label);
 };
 
 export const INITIAL_ACHIEVEMENTS = [

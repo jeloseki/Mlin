@@ -1,7 +1,7 @@
 // src/utils/pdfExport.js
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
-import { getLocalizedAchievement } from '../achievementsData'; // Uvezi funkciju za prijevod postignuća
+import { getLocalizedAchievement } from '../achievementsData';
 
 const RANK_STEPS = [
   { min: 0, hr: 'Bronca III', en: 'Bronze III' },
@@ -43,6 +43,47 @@ const fetchFontAsBase64 = async (url) => {
   });
 };
 
+const formatFullDate = (dateObj = new Date(), isEn = false) => {
+  const d = dateObj.getDate();
+  const m = dateObj.getMonth() + 1;
+  const y = dateObj.getFullYear();
+  if (isEn) {
+    const mm = String(m).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return `${mm}/${dd}/${y}`;
+  }
+  return `${d}.${m}.${y}.`;
+};
+
+const normalizeMatchDateWithYear = (rawDate, isEn = false) => {
+  const fallbackYear = new Date().getFullYear();
+  if (!rawDate || rawDate === '-') return formatFullDate(new Date(), isEn);
+  const str = String(rawDate).trim();
+  if (/\d{4}/.test(str)) return str;
+  const cleaned = str.replace(/\.$/, '');
+  return `${cleaned}.${fallbackYear}.`;
+};
+
+const emojiToDataUrl = (emoji) => {
+  if (!emoji || typeof document === 'undefined') return null;
+  try {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, size, size);
+    ctx.font = '46px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(emoji), size / 2, size / 2 + 2);
+    return canvas.toDataURL('image/png');
+  } catch (e) {
+    return null;
+  }
+};
+
 export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang = 'hr') => {
   try {
     if (!profile) {
@@ -52,11 +93,10 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
 
     const isEn = lang === 'en';
 
-    // Dvojezični labeli i tekstovi za PDF
     const l = {
       headerTitle: isEn ? 'MILL - OFFICIAL PROFILE REPORT' : 'MLIN - SLUŽBENI IZVJEŠTAJ PROFILA',
       generated: isEn ? 'Generated:' : 'Generirano:',
-      gameName: isEn ? "Nine Men's Morris" : "Nine Men's Morris",
+      gameName: isEn ? 'Mill' : 'Mlin',
       player: isEn ? 'Player' : 'Igrač',
       rank: isEn ? 'Rank' : 'Rang',
       status: isEn ? 'Status' : 'Status',
@@ -116,7 +156,7 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
     doc.setFont('Roboto', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(203, 213, 225);
-    doc.text(`${l.generated} ${new Date().toLocaleDateString(isEn ? 'en-US' : 'hr-HR')} | ${l.gameName}`, 15, 25);
+    doc.text(`${l.generated} ${formatFullDate(new Date(), isEn)} | ${l.gameName}`, 15, 25);
 
     // --- KARTICA S PODACIMA O IGRAČU ---
     let currentY = 42;
@@ -124,15 +164,26 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
     doc.setDrawColor(203, 213, 225);
     doc.roundedRect(15, currentY, 180, 22, 3, 3, 'FD');
 
+    const playerAvatarImg =
+      profile.avatar && !(profile.avatar.startsWith('data:image') || profile.avatar.startsWith('http'))
+        ? emojiToDataUrl(profile.avatar)
+        : null;
+
+    if (playerAvatarImg) {
+      doc.addImage(playerAvatarImg, 'PNG', 19, currentY + 5, 11, 11);
+    }
+
+    const textOffsetX = playerAvatarImg ? 34 : 20;
+
     doc.setFont('Roboto', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(...textMain);
-    doc.text(`${l.player}: ${profile.name || (isEn ? 'Player' : 'Igrač')}`, 20, currentY + 8);
+    doc.text(`${l.player}: ${profile.name || (isEn ? 'Player' : 'Igrač')}`, textOffsetX, currentY + 8);
 
     doc.setFont('Roboto', 'normal');
     doc.setFontSize(9.5);
     doc.setTextColor(...textMuted);
-    doc.text(`${l.rank}: ${getRankName(Number(profile.points) || 0, lang)}   |   ${l.status}: "${profile.bio || l.defaultBio}"`, 20, currentY + 15);
+    doc.text(`${l.rank}: ${getRankName(Number(profile.points) || 0, lang)}   |   ${l.status}: "${profile.bio || l.defaultBio}"`, textOffsetX, currentY + 15);
 
     currentY += 32;
 
@@ -172,12 +223,22 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
     const catalog = Array.isArray(achievementsCatalog) ? achievementsCatalog : [];
     const unlockedAchievements = catalog.filter(a => userAchIds.includes(String(a.id).trim()));
 
+    const achIconMap = new Map();
     const achievementsData = unlockedAchievements.length > 0
       ? unlockedAchievements.map((rawA, idx) => {
-        const a = getLocalizedAchievement(rawA, lang); // Prevodimo postignuće na odabrani jezik
+        const a = getLocalizedAchievement(rawA, lang);
+        const rawIcon = rawA.icon || a.icon || '🏅';
+        const iconImg = emojiToDataUrl(rawIcon);
+        if (iconImg) {
+          achIconMap.set(idx, iconImg);
+        }
+        const titleLabel = a.title || a.name || (isEn ? 'Achievement' : 'Postignuće');
         return [
           (idx + 1).toString(),
-          a.title || a.name || (isEn ? 'Achievement' : 'Postignuće'),
+          {
+            content: titleLabel,
+            styles: iconImg ? { cellPadding: { top: 4, right: 3.5, bottom: 4, left: 11 } } : undefined
+          },
           a.desc || a.description || '-',
           `+${a.points || 10} ${l.ptUnit}`
         ];
@@ -189,14 +250,30 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
       margin: { left: 15, right: 15 },
       head: [[l.achColNum, l.achColName, l.achColDesc, l.achColPoints]],
       body: achievementsData,
-      styles: { font: 'Roboto', fontSize: 9, textColor: textMain, cellPadding: 3.5 },
+      styles: { font: 'Roboto', fontSize: 9, textColor: textMain, cellPadding: 3.5, valign: 'middle' },
       headStyles: { fillColor: brandDark, fontStyle: 'bold', textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       columnStyles: {
         0: { cellWidth: 12, halign: 'center' },
-        1: { cellWidth: 55, fontStyle: 'bold' },
-        2: { cellWidth: 88 },
+        1: { cellWidth: 60, fontStyle: 'bold' },
+        2: { cellWidth: 83 },
         3: { cellWidth: 25, halign: 'center', textColor: [217, 119, 6], fontStyle: 'bold' }
+      },
+      didDrawCell: (data) => {
+        if (data.section === 'body' && data.column.index === 1) {
+          const iconDataUrl = achIconMap.get(data.row.index);
+          if (iconDataUrl) {
+            const iconSize = 5.5;
+            doc.addImage(
+              iconDataUrl,
+              'PNG',
+              data.cell.x + 2.5,
+              data.cell.y + (data.cell.height - iconSize) / 2,
+              iconSize,
+              iconSize
+            );
+          }
+        }
       }
     });
 
@@ -226,7 +303,7 @@ export const exportProfileToPDF = async (profile, achievementsCatalog = [], lang
             styles: { textColor: isWin ? successGreen : errorRed, fontStyle: 'bold' }
           },
           m.score || '-',
-          m.date || '-'
+          normalizeMatchDateWithYear(m.date, isEn)
         ];
       })
       : [['-', l.noHistory, '-', '-', '-']];

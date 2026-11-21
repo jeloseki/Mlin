@@ -6,7 +6,7 @@ import { checkFormsMill, isPieceInMill, hasLegalMoves } from './logic/millEngine
 import { getAIPlacementNode, getAIPieceToRemove, getAIMove } from './logic/aiEngine';
 import './App.css';
 import { getNextNodeByDirection } from './utils/keyboardNav';
-import { getOrCreateProfile, updateMatchResults, saveMatchHistory, getLeaderboard } from './gameService';
+import { getOrCreateProfile, updateMatchResults, recordDrawMatchResults, saveMatchHistory, getLeaderboard, getPlayerGlobalRank } from './gameService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
 // === FIREBASE AUTH UVOZ ===
@@ -20,7 +20,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 // ==========================
-import { getStoredAchievements, getLocalizedAchievement, ACHIEVEMENT_TIERS } from './achievementsData';
+import { getStoredAchievements, getLocalizedAchievement, ACHIEVEMENT_TIERS, getLocalizedTierLabel } from './achievementsData';
 import { evaluateGameAchievements } from './achievementsEvaluator';
 import { getStoredAvatars, getDefaultUnlockedAvatarIds, fetchAvatarsFromFirebase, evaluateGameAvatars } from './avatarsData';
 import { exportProfileToPDF } from './utils/pdfExport';
@@ -33,6 +33,8 @@ import { startOnlineMatchmaking } from './onlineMatchmaking';
 
 const ABANDON_PENALTY_POINTS = 15; // Više od standardnog poraza (-6), nikad ispod 0
 const OFFLINE_ABANDON_SECONDS = 30;
+const MAX_NO_MILL_HALF_MOVES = 40; // 40 polupoteza bez mlina -> remi
+const DRAW_SPLIT_POINTS = 4; // Podjela bodova kod remija
 
 const RANK_STEPS = [
   { min: 0, hr: '🥉 Bronca III', en: '🥉 Bronze III' },
@@ -67,6 +69,14 @@ const MATCHMAKING_TIPS = {
     '💡 Tip: Once an opponent drops to 3 pieces, they can fly anywhere — guard against sudden mills!',
     '💡 Tip: Sometimes keeping a piece outside a mill gives you better defensive control.'
   ]
+};
+
+// Formatiranje datuma s punom godinom (npr. 20.11.2026.)
+const formatDateWithYear = (dateObj = new Date()) => {
+  const d = dateObj.getDate();
+  const m = dateObj.getMonth() + 1;
+  const y = dateObj.getFullYear();
+  return `${d}.${m}.${y}.`;
 };
 
 const getRankName = (points, lang) => {
@@ -107,18 +117,21 @@ const playAudioEffect = (type, soundEnabled = true) => {
       gain.gain.setValueAtTime(0.4, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
       osc.start(); osc.stop(now + 0.12);
     } else if (type === 'matchFound') {
-      const chord = [440, 554.37, 659.25, 880];
-      chord.forEach((freq, idx) => {
+      const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+      notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
         osc.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.07);
-        gain.gain.setValueAtTime(0.18, now + idx * 0.07);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.07 + 0.24);
-        osc.start(now + idx * 0.07);
-        osc.stop(now + idx * 0.07 + 0.24);
+        osc.type = idx % 2 === 0 ? 'triangle' : 'sine';
+        const startAt = now + idx * 0.085;
+        const dur = idx === notes.length - 1 ? 0.36 : 0.16;
+        osc.frequency.setValueAtTime(freq, startAt);
+        gain.gain.setValueAtTime(0.001, startAt);
+        gain.gain.linearRampToValueAtTime(0.16, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
+        osc.start(startAt);
+        osc.stop(startAt + dur + 0.02);
       });
     } else if (type === 'coinSpin') {
       for (let i = 0; i < 14; i++) {
@@ -168,6 +181,116 @@ const playAudioEffect = (type, soundEnabled = true) => {
     }
   } catch (e) { }
 };
+
+// Lagani instrumentalni generator pozadinske glazbe (Web Audio API) s promjenom intenziteta
+class AmbientMusicPlayer {
+  constructor() {
+    this.ctx = null;
+    this.masterGain = null;
+    this.timer = null;
+    this.step = 0;
+    this.isPlaying = false;
+    this.intensity = 'calm';
+    this.volume = 0.35;
+    this.sessionId = 0;
+  }
+
+  setVolume(vol0to100) {
+    this.volume = Math.max(0, Math.min(1, Number(vol0to100) / 100));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.masterGain.gain.setTargetAtTime(this.isPlaying ? this.volume * 0.18 : 0, this.ctx.currentTime, 0.03);
+    }
+  }
+
+  setIntensity(level) {
+    this.intensity = level;
+  }
+
+  start(enabled, vol0to100) {
+    this.setVolume(vol0to100);
+    if (!enabled || Number(vol0to100) <= 0) {
+      this.stop();
+      return;
+    }
+
+    try {
+      if (!this.ctx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioCtx();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = this.volume * 0.18;
+        this.masterGain.connect(this.ctx.destination);
+      }
+
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+
+      if (this.isPlaying) return;
+
+      this.isPlaying = true;
+      const currentSession = ++this.sessionId;
+      this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.masterGain.gain.setTargetAtTime(this.volume * 0.18, this.ctx.currentTime, 0.08);
+
+      const scales = {
+        calm: [261.63, 329.63, 392.00, 493.88, 523.25, 392.00, 329.63, 293.66],
+        lively: [293.66, 369.99, 440.00, 587.33, 659.25, 587.33, 440.00, 369.99],
+        intense: [329.63, 392.00, 493.88, 659.25, 783.99, 659.25, 587.33, 493.88]
+      };
+
+      const tick = () => {
+        if (!this.isPlaying || currentSession !== this.sessionId || !this.ctx) return;
+
+        const notes = scales[this.intensity] || scales.calm;
+        const freq = notes[this.step % notes.length];
+        const now = this.ctx.currentTime;
+
+        const osc = this.ctx.createOscillator();
+        const noteGain = this.ctx.createGain();
+        osc.type = this.intensity === 'intense' ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+
+        const duration = this.intensity === 'intense' ? 0.45 : this.intensity === 'lively' ? 0.65 : 0.95;
+        noteGain.gain.setValueAtTime(0.001, now);
+        noteGain.gain.linearRampToValueAtTime(this.intensity === 'intense' ? 0.45 : 0.3, now + 0.06);
+        noteGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        osc.connect(noteGain);
+        noteGain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + duration + 0.03);
+
+        this.step += 1;
+        const nextDelay = this.intensity === 'intense' ? 420 : this.intensity === 'lively' ? 620 : 950;
+        this.timer = setTimeout(tick, nextDelay);
+      };
+
+      tick();
+    } catch (e) {}
+  }
+
+  stop() {
+    this.isPlaying = false;
+    this.sessionId += 1;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.masterGain && this.ctx) {
+      try {
+        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      } catch (e) {}
+    }
+    if (this.ctx && this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => {});
+    }
+  }
+}
+
+const ambientMusicPlayer = new AmbientMusicPlayer();
 
 const loadSyncedProfile = (userEmail = null) => {
   const defaultAvatars = getDefaultUnlockedAvatarIds();
@@ -285,6 +408,25 @@ export default function App() {
 
   const [currentScreen, setCurrentScreen] = useState('MAIN_MENU');
   const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // === GLAZBA STATEOVI (ON/OFF + VOLUMEN 0-100) ===
+  const [musicEnabled, setMusicEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mlin_music_enabled');
+      return saved === null ? true : saved === 'true';
+    } catch (e) {
+      return true;
+    }
+  });
+  const [musicVolume, setMusicVolume] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mlin_music_volume');
+      return saved === null ? 35 : Math.max(0, Math.min(100, Number(saved)));
+    } catch (e) {
+      return 35;
+    }
+  });
+
   const fileInputRef = useRef(null);
   const onlineRewardProcessedRef = useRef(null);
   const latestOnlineGameDataRef = useRef(null);
@@ -321,6 +463,13 @@ export default function App() {
   const [abandonBanner, setAbandonBanner] = useState('');
   // ===================================================
 
+  // === 40 POLUPOTEZA BEZ MLINA (KAD SU OBA NA 3 FIGURE) & PONUDA REMIJA ===
+  const [noMillHalfMoves, setNoMillHalfMoves] = useState(0);
+  const [isDrawGame, setIsDrawGame] = useState(false);
+  const [drawOfferBy, setDrawOfferBy] = useState(null); // 'WHITE' | 'BLACK' | null
+  const [drawNotice, setDrawNotice] = useState('');
+  // =========================================================================
+
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminLoginError, setAdminLoginError] = useState('');
   const [titleClickCount, setTitleClickCount] = useState(0);
@@ -335,7 +484,104 @@ export default function App() {
   const [avatarsCatalog, setAvatarsCatalog] = useState(() => getStoredAvatars());
   const [achievementFilter, setAchievementFilter] = useState('ALL');
 
-  // === PRAĆENJE FIREBASE AUTENTIFIKACIJE I UČITAVANJE PROFILA ===
+  const [profileTab, setProfileTab] = useState('STATS');
+  const [isEditingName, setIsEditingName] = useState(false);
+
+  const [isAIMode, setIsAIMode] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState('EASY');
+  const [aiColor, setAiColor] = useState('BLACK');
+
+  const [setupStep, setSetupStep] = useState('NAMES');
+  const [p1Name, setP1Name] = useState(profile.name);
+  const [p2Name, setP2Name] = useState('Igrač 2');
+
+  const [coinRotation, setCoinRotation] = useState(0);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const [coinResultText, setCoinResultText] = useState('');
+  const [coinWinner, setCoinWinner] = useState(null);
+  const [onlineCoinTosserColor, setOnlineCoinTosserColor] = useState('WHITE');
+  const [onlineCoinChoice, setOnlineCoinChoice] = useState(null);
+  const [onlineCoinDone, setOnlineCoinDone] = useState(false);
+
+  const [captured, setCaptured] = useState({ WHITE: 0, BLACK: 0 });
+  const [millsCount, setMillsCount] = useState({ WHITE: 0, BLACK: 0 });
+  const [turnCount, setTurnCount] = useState(0);
+  const [matchSummary, setMatchSummary] = useState(null);
+
+  const [lastMove, setLastMove] = useState({
+    WHITE: null,
+    BLACK: null
+  });
+
+  const [players, setPlayers] = useState({
+    WHITE: { name: '', id: 1 },
+    BLACK: { name: '', id: 2 }
+  });
+
+  const [activeBoardTheme, setActiveBoardTheme] = useState(() => {
+    const boardsList = getStoredBoards();
+    const activeBoardId = profile?.activeBoard || 'classic-blue-gold';
+    return boardsList.find(b => b.id === activeBoardId) || boardsList[0];
+  });
+
+  const [board, setBoard] = useState(Array(24).fill(null));
+  const [turn, setTurn] = useState('WHITE');
+  const [unplaced, setUnplaced] = useState({ WHITE: 9, BLACK: 9 });
+  const [mustRemove, setMustRemove] = useState(false);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [keyboardFocusNode, setKeyboardFocusNode] = useState(0);
+  const [winner, setWinner] = useState(null);
+
+  const [gameCategory, setGameCategory] = useState('CASUAL');
+  const [timeControl, setTimeControl] = useState(120);
+  const [timeLeft, setTimeLeft] = useState({ WHITE: 120, BLACK: 120 });
+
+  const [activeHeldPiece, setActiveHeldPiece] = useState(null);
+  const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
+  const isMouseDownRef = useRef(false);
+
+  const [sortBy, setSortBy] = useState('newest');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const [globalRankInfo, setGlobalRankInfo] = useState(null); // { rank, totalPlayers }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mlin_music_enabled', String(musicEnabled));
+      localStorage.setItem('mlin_music_volume', String(musicVolume));
+    } catch (e) {}
+
+    let level = 'calm';
+    if (currentScreen === 'ONLINE_SEARCH') {
+      level = 'lively';
+    } else if (currentScreen === 'GAME' && setupStep === 'PLAY') {
+      const wCount = board.filter(c => c === 'WHITE').length;
+      const bCount = board.filter(c => c === 'BLACK').length;
+      if (turnCount > 24 || wCount <= 4 || bCount <= 4) {
+        level = 'intense';
+      } else {
+        level = 'lively';
+      }
+    }
+    ambientMusicPlayer.setIntensity(level);
+
+    const unlockAndPlay = () => {
+      ambientMusicPlayer.start(musicEnabled, musicVolume);
+    };
+
+    if (!currentUser || !musicEnabled || musicVolume <= 0) {
+      ambientMusicPlayer.stop();
+      return;
+    }
+
+    ambientMusicPlayer.start(musicEnabled, musicVolume);
+    window.addEventListener('pointerdown', unlockAndPlay, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockAndPlay);
+    };
+  }, [musicEnabled, musicVolume, currentScreen, setupStep, turnCount, board, currentUser]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -356,7 +602,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // === POKRETANJE I ČIŠĆENJE ONLINE MATCHMAKINGA + ANIMACIJE ČEKAONICE ===
   useEffect(() => {
     if (currentScreen !== 'ONLINE_SEARCH') {
       return;
@@ -383,9 +628,20 @@ export default function App() {
         abandonHandledRef.current = false;
         setDisconnectSeconds(0);
         setWinner(null);
+        setIsDrawGame(false);
+        setNoMillHalfMoves(0);
+        setDrawOfferBy(null);
+        setDrawNotice('');
         setMatchSummary(null);
-        setSetupStep('PLAY');
+        setLastMove({ WHITE: null, BLACK: null });
+        const randomTosser = Math.random() < 0.5 ? 'WHITE' : 'BLACK';
+        setOnlineCoinTosserColor(randomTosser);
+        setOnlineCoinChoice(null);
+        setOnlineCoinDone(false);
+        setCoinResultText('');
+        setCoinWinner(null);
         setCurrentScreen('GAME');
+        setSetupStep('COIN_TOSS');
         navigate(`/game/${gameId}`);
       },
       onError: (msg) => setMatchmakingError(msg)
@@ -462,6 +718,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    ambientMusicPlayer.stop();
     await signOut(auth);
     setCurrentScreen('MAIN_MENU');
   };
@@ -575,6 +832,11 @@ export default function App() {
       const freshProfile = loadSyncedProfile(currentUser?.email);
       setProfile(freshProfile);
 
+      try {
+        const rankRes = await getPlayerGlobalRank(freshProfile.points);
+        if (rankRes) setGlobalRankInfo(rankRes);
+      } catch (e) { }
+
       const savedCustomAch = localStorage.getItem('mlin_admin_achievements');
       if (savedCustomAch) {
         try {
@@ -605,58 +867,6 @@ export default function App() {
     return () => window.removeEventListener('storage', updateCatalogs);
   }, [currentScreen, currentUser]);
 
-  const [profileTab, setProfileTab] = useState('STATS');
-  const [isEditingName, setIsEditingName] = useState(false);
-
-  const [isAIMode, setIsAIMode] = useState(false);
-  const [aiDifficulty, setAiDifficulty] = useState('EASY');
-  const [aiColor, setAiColor] = useState('BLACK');
-
-  const [setupStep, setSetupStep] = useState('NAMES');
-  const [p1Name, setP1Name] = useState(profile.name);
-  const [p2Name, setP2Name] = useState('Igrač 2');
-
-  const [coinRotation, setCoinRotation] = useState(0);
-  const [isFlipping, setIsFlipping] = useState(false);
-  const [coinResultText, setCoinResultText] = useState('');
-  const [coinWinner, setCoinWinner] = useState(null);
-  const [captured, setCaptured] = useState({ WHITE: 0, BLACK: 0 });
-
-  const [millsCount, setMillsCount] = useState({ WHITE: 0, BLACK: 0 });
-  const [turnCount, setTurnCount] = useState(0);
-  const [matchSummary, setMatchSummary] = useState(null);
-
-  const [players, setPlayers] = useState({
-    WHITE: { name: '', id: 1 },
-    BLACK: { name: '', id: 2 }
-  });
-
-  const [activeBoardTheme, setActiveBoardTheme] = useState(() => {
-    const boardsList = getStoredBoards();
-    const activeBoardId = profile?.activeBoard || 'classic-blue-gold';
-    return boardsList.find(b => b.id === activeBoardId) || boardsList[0];
-  });
-
-  const [board, setBoard] = useState(Array(24).fill(null));
-  const [turn, setTurn] = useState('WHITE');
-  const [unplaced, setUnplaced] = useState({ WHITE: 9, BLACK: 9 });
-  const [mustRemove, setMustRemove] = useState(false);
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [keyboardFocusNode, setKeyboardFocusNode] = useState(0);
-  const [winner, setWinner] = useState(null);
-
-  const [gameCategory, setGameCategory] = useState('CASUAL');
-  const [timeControl, setTimeControl] = useState(120);
-  const [timeLeft, setTimeLeft] = useState({ WHITE: 120, BLACK: 120 });
-
-  const [activeHeldPiece, setActiveHeldPiece] = useState(null);
-  const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
-  const isMouseDownRef = useRef(false);
-
-  const [sortBy, setSortBy] = useState('newest');
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // === KAZNA ZA ODUSTAJANJE (IZLAZ U IZBORNIK ILI PREKID VEZE > 30s) ===
   const applyAbandonPenalty = (reason = 'QUIT') => {
     if (abandonHandledRef.current) return;
     abandonHandledRef.current = true;
@@ -666,8 +876,7 @@ export default function App() {
     const actualLost = Math.min(oldPoints, ABANDON_PENALTY_POINTS);
     const nextPoints = Math.max(0, oldPoints - ABANDON_PENALTY_POINTS);
 
-    const today = new Date();
-    const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
+    const dateStr = formatDateWithYear();
 
     const oppDisplayName = isAIMode
       ? `AI (${aiDifficulty})`
@@ -708,6 +917,8 @@ export default function App() {
     setAbandonBanner(bannerMsg);
     setDisconnectSeconds(0);
     setWinner(null);
+    setIsDrawGame(false);
+    setDrawOfferBy(null);
     setMatchSummary(null);
     setSelectedNode(null);
     setActiveHeldPiece(null);
@@ -717,9 +928,10 @@ export default function App() {
     }
   };
 
+  // Prati prekid veze SAMO u online meču (!isAIMode) kada je stvarno offline
   useEffect(() => {
-    const isActiveMatch = currentScreen === 'GAME' && setupStep === 'PLAY' && !winner;
-    if (!isActiveMatch) {
+    const isOnlineActiveMatch = Boolean(onlineGameId) && !isAIMode && currentScreen === 'GAME' && setupStep === 'PLAY' && !winner && !isDrawGame;
+    if (!isOnlineActiveMatch) {
       setDisconnectSeconds(0);
       return;
     }
@@ -757,7 +969,7 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
     };
-  }, [currentScreen, setupStep, winner, isAIMode, p2Name, aiDifficulty, gameCategory, lang, soundEnabled, currentUser, profile.name, onlineGameId]);
+  }, [onlineGameId, isAIMode, currentScreen, setupStep, winner, isDrawGame]);
 
   const handleExportProfilePDF = () => {
     exportProfileToPDF(profile, loadFullAchievementsCatalog(achievementsCatalog), lang);
@@ -771,21 +983,24 @@ export default function App() {
   }, [profile.activeBoard]);
 
   useEffect(() => {
-    if (onlineGameId) {
+    if (onlineGameId && !isAIMode) {
       onlineRewardProcessedRef.current = null;
       latestOnlineGameDataRef.current = null;
       abandonHandledRef.current = false;
       setDisconnectSeconds(0);
       setWinner(null);
+      setIsDrawGame(false);
+      setNoMillHalfMoves(0);
+      setDrawOfferBy(null);
+      setDrawNotice('');
       setMatchSummary(null);
-      setIsAIMode(false);
       setCurrentScreen('GAME');
-      setSetupStep('PLAY');
+      setSetupStep('COIN_TOSS');
     }
-  }, [onlineGameId]);
+  }, [onlineGameId, isAIMode]);
 
   useEffect(() => {
-    if (!onlineGameId) return;
+    if (!onlineGameId || isAIMode) return;
     const unsubscribe = onSnapshot(doc(db, "games", onlineGameId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -794,6 +1009,27 @@ export default function App() {
         if (data.currentTurn) setTurn(data.currentTurn);
         if (typeof data.mustRemove === 'boolean') setMustRemove(data.mustRemove);
         if (data.unplaced) setUnplaced(data.unplaced);
+        if (typeof data.noMillHalfMoves === 'number') setNoMillHalfMoves(data.noMillHalfMoves);
+        if ('drawOfferBy' in data) setDrawOfferBy(data.drawOfferBy || null);
+        if (data.lastMove) {
+          setLastMove(prev => ({
+            WHITE: data.lastMove.WHITE ?? prev.WHITE ?? null,
+            BLACK: data.lastMove.BLACK ?? prev.BLACK ?? null
+          }));
+        }
+
+        if (data.coinToss) {
+          if (data.coinToss.tosserColor) setOnlineCoinTosserColor(data.coinToss.tosserColor);
+          if (data.coinToss.choice) setOnlineCoinChoice(data.coinToss.choice);
+          if (data.coinToss.resultText) setCoinResultText(data.coinToss.resultText);
+          if (data.coinToss.completed) {
+            setOnlineCoinDone(true);
+            setSetupStep('PLAY');
+          }
+        } else if (data.board && data.board.some(cell => cell !== null)) {
+          setSetupStep('PLAY');
+        }
+
         if (data.playerWhite && data.playerBlack) {
           const whiteName = typeof data.playerWhite === 'object' ? (data.playerWhite.name || 'Bijeli') : data.playerWhite;
           const blackName = typeof data.playerBlack === 'object' ? (data.playerBlack.name || 'Crni') : data.playerBlack;
@@ -814,13 +1050,59 @@ export default function App() {
             });
           }
         }
-        if (data.winner && onlineRewardProcessedRef.current !== onlineGameId) {
+        if (data.isDraw && onlineRewardProcessedRef.current !== onlineGameId) {
+          handleDrawEnd(true, data);
+        } else if (data.winner && onlineRewardProcessedRef.current !== onlineGameId) {
           handleGameEnd(data.winner, true, data);
         }
       }
     });
     return () => unsubscribe();
-  }, [onlineGameId, profile.name]);
+  }, [onlineGameId, isAIMode, profile.name]);
+
+  const handleOnlineCoinToss = async (choice) => {
+    if (!onlineGameId || isAIMode || isFlipping || onlineCoinDone) return;
+    const resolvedColor = myColor || sessionStorage.getItem('mlin_my_color') || 'WHITE';
+    if (resolvedColor !== onlineCoinTosserColor) return;
+
+    setIsFlipping(true);
+    setOnlineCoinChoice(choice);
+    playAudioEffect('coinSpin', soundEnabled);
+
+    const isHeads = Math.random() < 0.5;
+    const currentBaseSpins = Math.floor(coinRotation / 360) + 6;
+    const finalDegree = isHeads ? currentBaseSpins * 360 : currentBaseSpins * 360 + 180;
+    setCoinRotation(finalDegree);
+
+    const wonToss = choice === (isHeads ? 'heads' : 'tails');
+    const starterColor = wonToss
+      ? onlineCoinTosserColor
+      : (onlineCoinTosserColor === 'WHITE' ? 'BLACK' : 'WHITE');
+    const resultLabel = isHeads ? t.heads : t.tails;
+
+    setTimeout(async () => {
+      playAudioEffect('coinLand', soundEnabled);
+      setIsFlipping(false);
+      setCoinResultText(resultLabel);
+      setOnlineCoinDone(true);
+      setTurn(starterColor);
+      setSetupStep('PLAY');
+
+      try {
+        await updateDoc(doc(db, 'games', onlineGameId), {
+          currentTurn: starterColor,
+          coinToss: {
+            tosserColor: onlineCoinTosserColor,
+            choice,
+            isHeads,
+            resultText: resultLabel,
+            starterColor,
+            completed: true
+          }
+        });
+      } catch (e) {}
+    }, 2200);
+  };
 
   useEffect(() => {
     const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
@@ -834,7 +1116,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAIMode || onlineGameId || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+    if (!isAIMode || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner || isDrawGame) return;
     if (turn === aiColor) {
       const timer = setTimeout(() => {
         if (mustRemove) {
@@ -857,10 +1139,10 @@ export default function App() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [turn, mustRemove, board, unplaced, isAIMode, onlineGameId, currentScreen, setupStep, winner, aiColor, aiDifficulty]);
+  }, [turn, mustRemove, board, unplaced, isAIMode, currentScreen, setupStep, winner, isDrawGame, aiColor, aiDifficulty]);
 
   useEffect(() => {
-    if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
+    if (gameCategory !== 'COMPETITIVE' || currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner || isDrawGame) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         const currentTime = prev[turn];
@@ -875,12 +1157,12 @@ export default function App() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [gameCategory, currentScreen, setupStep, winner, turn]);
+  }, [gameCategory, currentScreen, setupStep, winner, isDrawGame, turn]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner) return;
-      if (onlineGameId && turn !== myColor) return;
+      if (currentScreen !== 'GAME' || setupStep !== 'PLAY' || winner || isDrawGame) return;
+      if (onlineGameId && !isAIMode && turn !== myColor) return;
       if (isAIMode && turn === aiColor) return;
 
       let direction = null;
@@ -899,7 +1181,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentScreen, setupStep, winner, isAIMode, onlineGameId, myColor, turn, aiColor, keyboardFocusNode]);
+  }, [currentScreen, setupStep, winner, isDrawGame, isAIMode, onlineGameId, myColor, turn, aiColor, keyboardFocusNode]);
 
   const fetchLeaderboard = async () => {
     const liveProf = loadSyncedProfile(currentUser?.email);
@@ -952,6 +1234,13 @@ export default function App() {
       .slice(0, 100);
 
     setLeaderboard(sortedTop100);
+
+    try {
+      const rankRes = await getPlayerGlobalRank(liveProf.points);
+      if (rankRes) {
+        setGlobalRankInfo(rankRes);
+      }
+    } catch (e) { }
   };
 
   const totalMatches = profile.wins + profile.losses;
@@ -979,18 +1268,27 @@ export default function App() {
   const syncGameState = (nextBoard, nextTurn, extraUpdates = {}) => {
     setBoard(nextBoard);
     if (nextTurn) setTurn(nextTurn);
-    if (onlineGameId) {
+    if (onlineGameId && !isAIMode) {
       updateDoc(doc(db, "games", onlineGameId), {
         board: nextBoard,
         ...(nextTurn ? { currentTurn: nextTurn } : {}),
         ...extraUpdates
-      });
+      }).catch(() => {});
     }
   };
 
   const startCouchGame = () => {
+    if (location.pathname.startsWith('/game/')) navigate('/');
+    setOnlineCoinChoice(null);
+    setOnlineCoinDone(false);
     abandonHandledRef.current = false;
+    setDisconnectSeconds(0);
     setAbandonBanner('');
+    setNoMillHalfMoves(0);
+    setIsDrawGame(false);
+    setDrawOfferBy(null);
+    setDrawNotice('');
+    setLastMove({ WHITE: null, BLACK: null });
     setIsAIMode(false);
     setBoard(Array(24).fill(null));
     setTurn('WHITE');
@@ -1011,8 +1309,17 @@ export default function App() {
   };
 
   const startAIGame = (difficulty) => {
+    if (location.pathname.startsWith('/game/')) navigate('/');
+    setOnlineCoinChoice(null);
+    setOnlineCoinDone(false);
     abandonHandledRef.current = false;
+    setDisconnectSeconds(0);
     setAbandonBanner('');
+    setNoMillHalfMoves(0);
+    setIsDrawGame(false);
+    setDrawOfferBy(null);
+    setDrawNotice('');
+    setLastMove({ WHITE: null, BLACK: null });
     setIsAIMode(true);
     setAiDifficulty(difficulty);
     setAiColor('BLACK');
@@ -1127,6 +1434,285 @@ export default function App() {
 
   const getPiecesCount = (color) => board.filter(cell => cell === color).length;
 
+  const isPlacementDone = unplaced.WHITE === 0 && unplaced.BLACK === 0;
+  const bothAtThreePieces =
+    isPlacementDone &&
+    getPiecesCount('WHITE') === 3 &&
+    getPiecesCount('BLACK') === 3;
+
+  const handleDrawEnd = (fromSnapshot = false, onlineGameData = null) => {
+    if (winner || isDrawGame) return;
+    setIsDrawGame(true);
+    setDrawOfferBy(null);
+    setDrawNotice('');
+
+    const gData = onlineGameData || latestOnlineGameDataRef.current;
+    const dateStr = formatDateWithYear();
+    const splitPts = gameCategory === 'COMPETITIVE' ? DRAW_SPLIT_POINTS : 2;
+
+    if (onlineGameId && !isAIMode) {
+      if (onlineRewardProcessedRef.current === onlineGameId) return;
+      onlineRewardProcessedRef.current = onlineGameId;
+
+      if (!fromSnapshot) {
+        updateDoc(doc(db, "games", onlineGameId), { isDraw: true, drawOfferBy: null }).catch(() => { });
+      }
+
+      const whiteObj = gData?.playerWhite;
+      const blackObj = gData?.playerBlack;
+      const whiteName = (typeof whiteObj === 'object' ? whiteObj?.name : whiteObj) || players.WHITE?.name || 'Bijeli';
+      const blackName = (typeof blackObj === 'object' ? blackObj?.name : blackObj) || players.BLACK?.name || 'Crni';
+
+      const currentLocalProf = loadSyncedProfile(currentUser?.email);
+      const localNameClean = (currentLocalProf.name || profile.name || '').trim().toLowerCase();
+
+      const resolvedMyColor =
+        myColor ||
+        sessionStorage.getItem('mlin_my_color') ||
+        (whiteName.trim().toLowerCase() === localNameClean
+          ? 'WHITE'
+          : (blackName.trim().toLowerCase() === localNameClean ? 'BLACK' : 'WHITE'));
+
+      const oppColor = resolvedMyColor === 'WHITE' ? 'BLACK' : 'WHITE';
+      const oppName = oppColor === 'WHITE' ? whiteName : blackName;
+      const oppObj = oppColor === 'WHITE' ? whiteObj : blackObj;
+      const oppPoints = Number(typeof oppObj === 'object' ? (oppObj?.points || 0) : 0);
+      const oppWins = Number(typeof oppObj === 'object' ? (oppObj?.wins || 0) : 0);
+      const oppLosses = Number(typeof oppObj === 'object' ? (oppObj?.losses || 0) : 0);
+
+      const nextLocalPoints = Number(currentLocalProf.points || 0) + splitPts;
+      const drawMatch = {
+        player: currentLocalProf.name || profile.name || p1Name,
+        vs: `${oppName} (${lang === 'hr' ? 'Remi' : 'Draw'})`,
+        isWin: false,
+        isDraw: true,
+        score: `+${splitPts} ${t.ptsUnit}`,
+        date: dateStr,
+        category: gameCategory
+      };
+
+      const updatedLocal = evaluateGameAvatars({
+        ...currentLocalProf,
+        points: nextLocalPoints,
+        matchHistory: [drawMatch, ...(currentLocalProf.matchHistory || []).slice(0, 19)]
+      });
+
+      updateProfileAndSave(updatedLocal);
+      saveMatchHistory(drawMatch);
+
+      const oppFinalPoints = oppPoints + splitPts;
+      setMatchSummary({
+        isAIMode: false,
+        isDraw: true,
+        aiDifficulty,
+        winnerName: lang === 'hr' ? 'Remi (Podjela bodova)' : 'Draw (Split Points)',
+        leftPlayer: {
+          name: updatedLocal.name,
+          avatar: updatedLocal.avatar || '🦁',
+          isWin: false,
+          isDraw: true,
+          baseDelta: splitPts,
+          millBonus: 0,
+          domBonus: 0,
+          achievementBonusPoints: 0,
+          totalPointChange: splitPts,
+          finalPoints: nextLocalPoints,
+          rankName: getRankName(nextLocalPoints, lang),
+          titleWins: Number(updatedLocal.wins || 0),
+          titleLosses: Number(updatedLocal.losses || 0),
+          newAchievements: [],
+          newAvatars: [],
+          mills: millsCount[resolvedMyColor] || 0,
+          captured: captured[resolvedMyColor] || 0
+        },
+        rightPlayer: {
+          name: oppName,
+          avatar: '🦊',
+          isWin: false,
+          isDraw: true,
+          baseDelta: splitPts,
+          millBonus: 0,
+          domBonus: 0,
+          achievementBonusPoints: 0,
+          totalPointChange: splitPts,
+          finalPoints: oppFinalPoints,
+          rankName: getRankName(oppFinalPoints, lang),
+          titleWins: oppWins,
+          titleLosses: oppLosses,
+          newAchievements: [],
+          newAvatars: [],
+          mills: millsCount[oppColor] || 0,
+          captured: captured[oppColor] || 0
+        }
+      });
+      return;
+    }
+
+    const p1BaseProfile = { ...loadSyncedProfile(currentUser?.email), name: p1Name || profile.name };
+    const p1NextPoints = Number(p1BaseProfile.points || 0) + splitPts;
+    const p1Match = {
+      player: p1BaseProfile.name,
+      vs: `${p2Name} (${lang === 'hr' ? 'Remi' : 'Draw'})`,
+      isWin: false,
+      isDraw: true,
+      score: `+${splitPts} ${t.ptsUnit}`,
+      date: dateStr,
+      category: gameCategory
+    };
+
+    const p1Updated = evaluateGameAvatars({
+      ...p1BaseProfile,
+      points: p1NextPoints,
+      matchHistory: [p1Match, ...(p1BaseProfile.matchHistory || []).slice(0, 19)]
+    });
+    updateProfileAndSave(p1Updated);
+    saveMatchHistory(p1Match);
+
+    let p2SummaryData = null;
+    if (!isAIMode) {
+      let adminList = [];
+      try {
+        const rawAdmin = localStorage.getItem('mlin_admin_profiles');
+        if (rawAdmin) adminList = JSON.parse(rawAdmin);
+      } catch (e) { }
+
+      const existingP2 = Array.isArray(adminList)
+        ? adminList.find(p => p.name && p.name.toLowerCase() === p2Name.trim().toLowerCase())
+        : null;
+
+      const p2BaseProfile = existingP2 || {
+        id: 'player-' + Date.now(),
+        name: p2Name,
+        avatar: '🦊',
+        bio: 'Spreman za igru!',
+        country: 'HR',
+        points: 0,
+        wins: 0,
+        losses: 0,
+        matchHistory: [],
+        achievements: [],
+        unlockedAvatars: getDefaultUnlockedAvatarIds()
+      };
+
+      const p2NextPoints = Number(p2BaseProfile.points || 0) + splitPts;
+      const p2Match = {
+        player: p2BaseProfile.name,
+        vs: `${p1BaseProfile.name} (${lang === 'hr' ? 'Remi' : 'Draw'})`,
+        isWin: false,
+        isDraw: true,
+        score: `+${splitPts} ${t.ptsUnit}`,
+        date: dateStr,
+        category: gameCategory
+      };
+
+      const p2Updated = evaluateGameAvatars({
+        ...p2BaseProfile,
+        points: p2NextPoints,
+        matchHistory: [p2Match, ...(p2BaseProfile.matchHistory || []).slice(0, 19)]
+      });
+
+      try {
+        const rawAdminAfter = localStorage.getItem('mlin_admin_profiles');
+        let listAfter = rawAdminAfter ? JSON.parse(rawAdminAfter) : [];
+        const p2ExistsIdx = listAfter.findIndex(p => p.name && p.name.toLowerCase() === p2Name.trim().toLowerCase());
+        if (p2ExistsIdx >= 0) {
+          listAfter[p2ExistsIdx] = { ...listAfter[p2ExistsIdx], ...p2Updated };
+        } else {
+          listAfter.push(p2Updated);
+        }
+        localStorage.setItem('mlin_admin_profiles', JSON.stringify(listAfter));
+        window.dispatchEvent(new Event('storage'));
+      } catch (e) { }
+
+      recordDrawMatchResults(p1BaseProfile.name, p2BaseProfile.name, gameCategory, splitPts);
+
+      p2SummaryData = {
+        name: p2Updated.name,
+        avatar: p2Updated.avatar || '🦊',
+        isWin: false,
+        isDraw: true,
+        baseDelta: splitPts,
+        millBonus: 0,
+        domBonus: 0,
+        achievementBonusPoints: 0,
+        totalPointChange: splitPts,
+        finalPoints: p2NextPoints,
+        rankName: getRankName(p2NextPoints, lang),
+        titleWins: Number(p2Updated.wins || 0),
+        titleLosses: Number(p2Updated.losses || 0),
+        newAchievements: [],
+        newAvatars: [],
+        mills: millsCount[p2Color] || 0,
+        captured: captured[p2Color] || 0
+      };
+    }
+
+    setMatchSummary({
+      isAIMode,
+      isDraw: true,
+      aiDifficulty,
+      winnerName: lang === 'hr' ? 'Remi (Podjela bodova)' : 'Draw (Split Points)',
+      leftPlayer: {
+        name: p1Updated.name,
+        avatar: p1Updated.avatar || '🦁',
+        isWin: false,
+        isDraw: true,
+        baseDelta: splitPts,
+        millBonus: 0,
+        domBonus: 0,
+        achievementBonusPoints: 0,
+        totalPointChange: splitPts,
+        finalPoints: p1NextPoints,
+        rankName: getRankName(p1NextPoints, lang),
+        titleWins: Number(p1Updated.wins || 0),
+        titleLosses: Number(p1Updated.losses || 0),
+        newAchievements: [],
+        newAvatars: [],
+        mills: millsCount[p1Color] || 0,
+        captured: captured[p1Color] || 0
+      },
+      rightPlayer: p2SummaryData
+    });
+  };
+
+  const handleOfferDraw = async () => {
+    if (winner || isDrawGame || drawOfferBy || !bothAtThreePieces) return;
+    const offeringSide = onlineGameId && !isAIMode
+      ? (myColor || sessionStorage.getItem('mlin_my_color') || turn)
+      : turn;
+
+    setDrawNotice('');
+    setDrawOfferBy(offeringSide);
+
+    if (onlineGameId && !isAIMode) {
+      updateDoc(doc(db, 'games', onlineGameId), { drawOfferBy: offeringSide }).catch(() => {});
+    } else if (isAIMode) {
+      setTimeout(() => {
+        if (winner || isDrawGame) return;
+        const acceptProb = aiDifficulty === 'HARD' ? 0.35 : aiDifficulty === 'MEDIUM' ? 0.55 : 0.75;
+        if (Math.random() < acceptProb) {
+          handleDrawEnd();
+        } else {
+          setDrawOfferBy(null);
+          setDrawNotice(lang === 'hr' ? '🤖 AI je odbio ponudu za remi.' : '🤖 AI declined the draw offer.');
+        }
+      }, 650);
+    }
+  };
+
+  const handleRespondDrawOffer = async (accepted) => {
+    if (!drawOfferBy || winner || isDrawGame) return;
+    if (!accepted) {
+      setDrawOfferBy(null);
+      setDrawNotice(lang === 'hr' ? 'Ponuda za remi je odbijena.' : 'Draw offer declined.');
+      if (onlineGameId && !isAIMode) {
+        updateDoc(doc(db, 'games', onlineGameId), { drawOfferBy: null }).catch(() => {});
+      }
+      return;
+    }
+    handleDrawEnd();
+  };
+
   const computePlayerExperience = (baseProf, isWin, playerColor, vsName, isVsAI, lang = 'hr') => {
     const t = TRANSLATIONS[lang];
     const defaultAvs = getDefaultUnlockedAvatarIds();
@@ -1141,8 +1727,7 @@ export default function App() {
     const matchOnlyDelta = baseDelta + millBonus + domBonus;
     const pointsAfterMatchRules = Math.max(0, (baseProf.points || 0) + matchOnlyDelta);
 
-    const today = new Date();
-    const dateStr = `${today.getDate()}.${today.getMonth() + 1}.`;
+    const dateStr = formatDateWithYear();
 
     const updatedBase = {
       ...baseProf,
@@ -1232,15 +1817,16 @@ export default function App() {
 
   const handleGameEnd = (winningColor, fromSnapshot = false, onlineGameData = null) => {
     setWinner(winningColor);
+    setDrawOfferBy(null);
 
     const gData = onlineGameData || latestOnlineGameDataRef.current;
 
-    if (onlineGameId) {
+    if (onlineGameId && !isAIMode) {
       if (onlineRewardProcessedRef.current === onlineGameId) return;
       onlineRewardProcessedRef.current = onlineGameId;
 
       if (!fromSnapshot) {
-        updateDoc(doc(db, "games", onlineGameId), { winner: winningColor }).catch(() => {});
+        updateDoc(doc(db, "games", onlineGameId), { winner: winningColor }).catch(() => { });
       }
 
       const whiteObj = gData?.playerWhite;
@@ -1385,10 +1971,18 @@ export default function App() {
     setActiveHeldPiece(null);
   };
 
-  const executePlaceOrMove = (nodeIndex, customSource = null) => {
-    if (winner) return;
-    if (onlineGameId && turn !== myColor) return;
+  const recordLastMove = (actorColor, movePayload, nextLastMoveState) => {
+    setLastMove(nextLastMoveState);
+    if (onlineGameId && !isAIMode) {
+      updateDoc(doc(db, 'games', onlineGameId), { lastMove: nextLastMoveState }).catch(() => {});
+    }
+  };
 
+  const executePlaceOrMove = (nodeIndex, customSource = null) => {
+    if (winner || isDrawGame) return;
+    if (onlineGameId && !isAIMode && turn !== myColor) return;
+
+    setDrawNotice('');
     const opponent = turn === 'WHITE' ? 'BLACK' : 'WHITE';
 
     if (mustRemove) {
@@ -1407,18 +2001,29 @@ export default function App() {
       setBoard(newBoard);
       setCaptured(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
       setMustRemove(false);
+      setNoMillHalfMoves(0);
       setSelectedNode(null);
       setActiveHeldPiece(null);
 
+      const nextLastMove = {
+        ...lastMove,
+        [turn]: {
+          type: 'REMOVE',
+          to: nodeIndex,
+          text: lang === 'hr' ? `Uklonjeno na čvor #${nodeIndex + 1}` : `Removed on node #${nodeIndex + 1}`
+        }
+      };
+      recordLastMove(turn, nextLastMove[turn], nextLastMove);
+
       const isOpponentDefeated = unplaced[opponent] === 0 && newBoard.filter(c => c === opponent).length < 3;
       if (isOpponentDefeated) {
-        syncGameState(newBoard, turn, { mustRemove: false, winner: turn });
+        syncGameState(newBoard, turn, { mustRemove: false, noMillHalfMoves: 0, winner: turn, lastMove: nextLastMove });
         handleGameEnd(turn);
         return;
       }
 
       setTimeout(() => {
-        syncGameState(newBoard, opponent, { mustRemove: false });
+        syncGameState(newBoard, opponent, { mustRemove: false, noMillHalfMoves: 0, lastMove: nextLastMove });
       }, 50);
       return;
     }
@@ -1438,18 +2043,46 @@ export default function App() {
       setActiveHeldPiece(null);
       setSelectedNode(null);
 
-      if (checkFormsMill(newBoard, nodeIndex, turn)) {
+      const formedMill = checkFormsMill(newBoard, nodeIndex, turn);
+      const bothThreeNow =
+        nextUnplaced.WHITE === 0 &&
+        nextUnplaced.BLACK === 0 &&
+        newBoard.filter(c => c === 'WHITE').length === 3 &&
+        newBoard.filter(c => c === 'BLACK').length === 3;
+      const nextHalfMoves = (!formedMill && bothThreeNow)
+        ? Math.min(MAX_NO_MILL_HALF_MOVES, noMillHalfMoves + 1)
+        : 0;
+      setNoMillHalfMoves(nextHalfMoves);
+
+      const nextLastMove = {
+        ...lastMove,
+        [turn]: {
+          type: 'PLACE',
+          to: nodeIndex,
+          text: formedMill
+            ? (lang === 'hr' ? `Postavljeno #${nodeIndex + 1} (MLIN!)` : `Placed #${nodeIndex + 1} (MILL!)`)
+            : (lang === 'hr' ? `Postavljeno na #${nodeIndex + 1}` : `Placed on #${nodeIndex + 1}`)
+        }
+      };
+      recordLastMove(turn, nextLastMove[turn], nextLastMove);
+
+      if (formedMill) {
         setMillsCount(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
         setMustRemove(true);
-        syncGameState(newBoard, turn, { mustRemove: true, unplaced: nextUnplaced });
+        syncGameState(newBoard, turn, { mustRemove: true, unplaced: nextUnplaced, noMillHalfMoves: 0, lastMove: nextLastMove });
       } else {
+        if (!formedMill && bothThreeNow && nextHalfMoves >= MAX_NO_MILL_HALF_MOVES) {
+          syncGameState(newBoard, opponent, { mustRemove: false, unplaced: nextUnplaced, noMillHalfMoves: nextHalfMoves, isDraw: true, lastMove: nextLastMove });
+          handleDrawEnd();
+          return;
+        }
         const isPlacementPhaseOver = nextUnplaced.WHITE === 0 && nextUnplaced.BLACK === 0;
         const oppCount = newBoard.filter(cell => cell === opponent).length;
         if (isPlacementPhaseOver && (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3))) {
           handleGameEnd(turn);
           return;
         }
-        syncGameState(newBoard, opponent, { mustRemove: false, unplaced: nextUnplaced });
+        syncGameState(newBoard, opponent, { mustRemove: false, unplaced: nextUnplaced, noMillHalfMoves: nextHalfMoves, lastMove: nextLastMove });
       }
       return;
     }
@@ -1481,17 +2114,46 @@ export default function App() {
         setSelectedNode(null);
         setActiveHeldPiece(null);
 
-        if (checkFormsMill(newBoard, nodeIndex, turn)) {
+        const formedMill = checkFormsMill(newBoard, nodeIndex, turn);
+        const bothThreeNow =
+          unplaced.WHITE === 0 &&
+          unplaced.BLACK === 0 &&
+          newBoard.filter(c => c === 'WHITE').length === 3 &&
+          newBoard.filter(c => c === 'BLACK').length === 3;
+        const nextHalfMoves = (!formedMill && bothThreeNow)
+          ? Math.min(MAX_NO_MILL_HALF_MOVES, noMillHalfMoves + 1)
+          : 0;
+        setNoMillHalfMoves(nextHalfMoves);
+
+        const nextLastMove = {
+          ...lastMove,
+          [turn]: {
+            type: 'MOVE',
+            from: source,
+            to: nodeIndex,
+            text: formedMill
+              ? (lang === 'hr' ? `#${source + 1} → #${nodeIndex + 1} (MLIN!)` : `#${source + 1} → #${nodeIndex + 1} (MILL!)`)
+              : (lang === 'hr' ? `#${source + 1} → #${nodeIndex + 1}` : `#${source + 1} → #${nodeIndex + 1}`)
+          }
+        };
+        recordLastMove(turn, nextLastMove[turn], nextLastMove);
+
+        if (formedMill) {
           setMillsCount(prev => ({ ...prev, [turn]: prev[turn] + 1 }));
           setMustRemove(true);
-          syncGameState(newBoard, turn, { mustRemove: true });
+          syncGameState(newBoard, turn, { mustRemove: true, noMillHalfMoves: 0, lastMove: nextLastMove });
         } else {
+          if (!formedMill && bothThreeNow && nextHalfMoves >= MAX_NO_MILL_HALF_MOVES) {
+            syncGameState(newBoard, opponent, { mustRemove: false, noMillHalfMoves: nextHalfMoves, isDraw: true, lastMove: nextLastMove });
+            handleDrawEnd();
+            return;
+          }
           const oppCount = newBoard.filter(cell => cell === opponent).length;
           if (oppCount < 3 || !hasLegalMoves(newBoard, opponent, oppCount === 3)) {
             handleGameEnd(turn);
             return;
           }
-          syncGameState(newBoard, opponent, { mustRemove: false });
+          syncGameState(newBoard, opponent, { mustRemove: false, noMillHalfMoves: nextHalfMoves, lastMove: nextLastMove });
         }
       } else if (board[nodeIndex] === turn) {
         playAudioEffect('pickup', soundEnabled);
@@ -1500,6 +2162,12 @@ export default function App() {
       }
     }
   };
+
+  const remainingNoMillMoves = Math.max(0, MAX_NO_MILL_HALF_MOVES - noMillHalfMoves);
+  const resolvedLocalColor = myColor || sessionStorage.getItem('mlin_my_color') || 'WHITE';
+  const canRespondToDrawOffer = Boolean(drawOfferBy) && (
+    !onlineGameId || isAIMode || drawOfferBy !== resolvedLocalColor
+  );
 
   const opponentColor = turn === 'WHITE' ? 'BLACK' : 'WHITE';
   const formatTime = (seconds) => {
@@ -1525,7 +2193,7 @@ export default function App() {
   const p2CapturedCount = captured[p2Color] || 0;
 
   const getStatsForSide = (sideColor, sideName) => {
-    if (onlineGameId) {
+    if (onlineGameId && !isAIMode) {
       const localNameClean = (profile.name || '').trim().toLowerCase();
       const sideNameClean = (sideName || '').trim().toLowerCase();
       if (sideNameClean === localNameClean) {
@@ -1545,12 +2213,16 @@ export default function App() {
   const renderPlayerExperienceColumn = (pData, sideLabel) => {
     if (!pData) return null;
     const isPositive = pData.totalPointChange >= 0;
+    const badgeBg = pData.isDraw ? '#eab308' : (pData.isWin ? '#22c55e' : '#ef4444');
+    const badgeLabel = pData.isDraw
+      ? (lang === 'hr' ? 'REMI' : 'DRAW')
+      : (pData.isWin ? (lang === 'hr' ? 'POBJEDA' : 'VICTORY') : (lang === 'hr' ? 'PORAZ' : 'DEFEAT'));
 
     return (
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', padding: '14px 16px',
-        backgroundColor: pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)',
-        borderRadius: '12px', border: pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155', minWidth: '260px'
+        backgroundColor: pData.isDraw ? 'rgba(234, 179, 8, 0.08)' : (pData.isWin ? 'rgba(34, 197, 94, 0.07)' : 'rgba(15, 23, 42, 0.65)'),
+        borderRadius: '12px', border: pData.isDraw ? '1px solid rgba(234, 179, 8, 0.45)' : (pData.isWin ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #334155'), minWidth: '260px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1578,15 +2250,21 @@ export default function App() {
               })()}
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px', backgroundColor: pData.isWin ? '#22c55e' : '#ef4444', color: '#000' }}>
-            {pData.isWin ? (lang === 'hr' ? 'POBJEDA' : 'VICTORY') : (lang === 'hr' ? 'PORAZ' : 'DEFEAT')}
+          <div style={{ fontSize: '0.72rem', fontWeight: 'bold', padding: '3px 10px', borderRadius: '999px', backgroundColor: badgeBg, color: '#000' }}>
+            {badgeLabel}
           </div>
         </div>
 
         <div style={{ width: '100%', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', boxSizing: 'border-box', textAlign: 'left' }}>
           <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px dashed #1e293b' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>{pData.isWin ? (lang === 'hr' ? 'Osnovni bodovi (Pobjeda):' : 'Base points (Win):') : (lang === 'hr' ? 'Osnovni bodovi (Poraz):' : 'Base points (Loss):')}</span>
+              <span>
+                {pData.isDraw
+                  ? (lang === 'hr' ? 'Podjela bodova (Remi):' : 'Split points (Draw):')
+                  : (pData.isWin
+                    ? (lang === 'hr' ? 'Osnovni bodovi (Pobjeda):' : 'Base points (Win):')
+                    : (lang === 'hr' ? 'Osnovni bodovi (Poraz):' : 'Base points (Loss):'))}
+              </span>
               <span style={{ color: pData.baseDelta >= 0 ? '#4ade80' : '#f87171' }}>{pData.baseDelta >= 0 ? `+${pData.baseDelta}` : pData.baseDelta}</span>
             </div>
             {pData.millBonus > 0 && (
@@ -1622,7 +2300,7 @@ export default function App() {
         </div>
 
         {pData.newAchievements && pData.newAchievements.length > 0 && (
-          <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(251, 191, 36, 0.08)', borderRadius: '10px', border: '1px solid rgba(251, 191, 36, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
+          <div className="no-scrollbar" style={{ width: '100%', maxHeight: '112px', overflowY: 'auto', padding: '10px 12px', backgroundColor: 'rgba(251, 191, 36, 0.08)', borderRadius: '10px', border: '1px solid rgba(251, 191, 36, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>
               🏅 {lang === 'hr' ? 'Nova Postignuća!' : 'New Achievements!'}
             </div>
@@ -1645,7 +2323,7 @@ export default function App() {
         )}
 
         {pData.newAvatars && pData.newAvatars.length > 0 && (
-          <div style={{ width: '100%', padding: '10px 12px', backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
+          <div className="no-scrollbar" style={{ width: '100%', maxHeight: '96px', overflowY: 'auto', padding: '10px 12px', backgroundColor: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.35)', boxSizing: 'border-box', textAlign: 'left' }}>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: '#38bdf8', fontWeight: 'bold', marginBottom: '6px' }}>
               🎭 {lang === 'hr' ? 'Otključani Avatari!' : 'Unlocked Avatars!'}
             </div>
@@ -1813,7 +2491,7 @@ export default function App() {
         </div>
       )}
 
-      {activeHeldPiece && !winner && (
+      {activeHeldPiece && !winner && !isDrawGame && (
         <div className={`floating-cursor-piece ${activeHeldPiece.color === 'WHITE' ? 'piece-white' : 'piece-black'}`} style={{ left: `${mousePos.x}px`, top: `${mousePos.y}px` }} />
       )}
 
@@ -1869,6 +2547,9 @@ export default function App() {
             </button>
             <button className="btn-menu" onClick={() => { fetchLeaderboard(); setCurrentScreen('LEADERBOARD'); }}>{t.leaderboard}</button>
             <button className="btn-menu" onClick={() => setCurrentScreen('SCORING')}>{t.scoring}</button>
+            <button className="btn-menu" disabled style={{ opacity: 0.65, cursor: 'not-allowed' }}>
+              {lang === 'hr' ? '🏆 Turniri (stiže uskoro)' : '🏆 Tournaments (coming soon)'}
+            </button>
             <button className="btn-menu" onClick={() => {
               setProfile(loadSyncedProfile(currentUser?.email));
               setAchievementsCatalog(loadFullAchievementsCatalog());
@@ -1920,8 +2601,8 @@ export default function App() {
             {matchmakingInfo.allowedDiff >= 999
               ? (lang === 'hr' ? 'Širim pretragu na sve dostupne rangove...' : 'Expanding search across all available ranks...')
               : (lang === 'hr'
-                  ? `Dopuštena razlika u rangu: ±${matchmakingInfo.allowedDiff}`
-                  : `Allowed rank difference: ±${matchmakingInfo.allowedDiff}`)}
+                ? `Dopuštena razlika u rangu: ±${matchmakingInfo.allowedDiff}`
+                : `Allowed rank difference: ±${matchmakingInfo.allowedDiff}`)}
           </p>
 
           <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#38bdf8', fontFamily: 'monospace', marginBottom: '12px' }}>
@@ -2043,7 +2724,11 @@ export default function App() {
 
       {/* PROFIL */}
       {currentScreen === 'PROFILE' && (
-        <div className="menu-card" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="menu-card"
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: '460px', maxWidth: '94vw', boxSizing: 'border-box' }}
+        >
           <div className="profile-header">
             <div className="avatar-container">
               {renderAvatar(profile.avatar)}
@@ -2092,206 +2777,236 @@ export default function App() {
             </div>
           )}
 
-          {profileTab === 'BOARDS' && (
-            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-              {(() => {
-                const liveProfile = loadSyncedProfile(currentUser?.email);
-                const unlockedBoardIds = Array.isArray(liveProfile?.unlockedBoards) ? liveProfile.unlockedBoards : ['classic-wood'];
-                const allBoards = getStoredBoards();
+          <div
+            className="no-scrollbar"
+            style={{
+              width: '100%',
+              height: '272px',
+              overflowY: 'auto',
+              boxSizing: 'border-box',
+              paddingRight: '2px'
+            }}
+          >
+            {profileTab === 'BOARDS' && (
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '9px', boxSizing: 'border-box' }}>
+                {(() => {
+                  const liveProfile = loadSyncedProfile(currentUser?.email);
+                  const unlockedBoardIds = Array.isArray(liveProfile?.unlockedBoards) ? liveProfile.unlockedBoards : ['classic-wood'];
+                  const allBoards = getStoredBoards();
 
-                return allBoards.map((board) => {
-                  const isUnlocked = board.price === 0 || board.isDefault || unlockedBoardIds.includes(board.id);
-                  const isSelected = (liveProfile.activeBoard || 'classic-wood') === board.id;
+                  return allBoards.map((board) => {
+                    const isUnlocked = board.price === 0 || board.isDefault || unlockedBoardIds.includes(board.id);
+                    const isSelected = (liveProfile.activeBoard || 'classic-wood') === board.id;
 
-                  return (
-                    <div
-                      key={board.id}
-                      onClick={() => {
-                        if (!isUnlocked) return;
-                        const updated = { ...liveProfile, activeBoard: board.id };
-                        updateProfileAndSave(updated);
-                        setActiveBoardTheme(board);
-                      }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '10px 14px', borderRadius: '8px',
-                        background: isSelected ? 'rgba(56, 189, 248, 0.15)' : '#0f172a',
-                        border: isSelected ? '2px solid #38bdf8' : (isUnlocked ? '1px solid #334155' : '1px solid #1e293b'),
-                        opacity: isUnlocked ? 1 : 0.45,
-                        cursor: isUnlocked ? 'pointer' : 'not-allowed'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{
-                          width: '32px', height: '32px', background: board.boardBackground,
-                          borderRadius: '6px', border: `1px solid ${board.linesColor}`
-                        }} />
+                    return (
+                      <div
+                        key={board.id}
+                        onClick={() => {
+                          if (!isUnlocked) return;
+                          const updated = { ...liveProfile, activeBoard: board.id };
+                          updateProfileAndSave(updated);
+                          setActiveBoardTheme(board);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '11px 14px', borderRadius: '8px',
+                          background: isSelected ? 'rgba(56, 189, 248, 0.15)' : '#0f172a',
+                          border: isSelected ? '2px solid #38bdf8' : (isUnlocked ? '1px solid #334155' : '1px solid #1e293b'),
+                          opacity: isUnlocked ? 1 : 0.45,
+                          cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                          boxSizing: 'border-box'
+                        }}
+                      >
                         <div style={{ textAlign: 'left' }}>
                           <div style={{ fontWeight: 'bold', fontSize: '0.88rem', color: '#f8fafc' }}>{getLocalizedBoardName(board, lang)}</div>
                           <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
                             {isUnlocked ? (isSelected ? t.activeTheme : t.clickToSelect) : (lang === 'hr' ? '🔒 Zaključano' : '🔒 Locked')}
                           </div>
                         </div>
+                        {isSelected && <span style={{ fontSize: '1.1rem' }}>👑</span>}
                       </div>
-                      {isSelected && <span style={{ fontSize: '1.1rem' }}>👑</span>}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          )}
-
-          {profileTab === 'STATS' && (
-            <div className="info-box">
-              <div className="info-item"><span>{t.rankClass}:</span> <span className="badge-rank">{getRankName(profile.points, lang)}</span></div>
-              <div className="info-item"><span>{t.totalPoints}:</span> <strong>{profile.points} B</strong></div>
-              <div className="info-item"><span>{t.winRate}:</span> <strong>{winRate}%</strong></div>
-              <div className="info-item"><span>{t.matches}:</span> <strong>{profile.wins} / {profile.losses}</strong></div>
-            </div>
-          )}
-
-          {profileTab === 'BADGES' && (
-            <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-              {(() => {
-                const liveProfile = loadSyncedProfile(currentUser?.email);
-                const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
-                const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
-                const unlockedList = userAchs.map(achId => uniqueCatalog.find(a => String(a.id).trim() === achId) || { id: achId, title: `Postignuće (${achId})`, desc: 'Ostvareno', icon: '🏅' });
-
-                if (unlockedList.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Igrač još nema dodijeljenih postignuća.' : 'Player has no achievements yet.'}</div>;
-                }
-
-                return unlockedList.map((rawAch) => {
-                  const ach = getLocalizedAchievement(rawAch, lang);
-
-                  return (
-                    <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>
-                      <div style={{ fontSize: '1.4rem' }}>{ach.icon || '🏅'}</div>
-                      <div style={{ flex: 1, textAlign: 'left' }}>
-                        <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>{ach.title || ach.name}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ach.description || ach.desc}</div>
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          )}
-
-          {profileTab === 'HISTORY' && (
-            <div>
-              {profile?.matchHistory && profile.matchHistory.length > 0 && (
-                <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{t.sortBy}</label>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
-                    style={{ background: '#071524', color: '#fff', border: '1px solid #d4af37', padding: '4px 8px', borderRadius: '6px', fontSize: '0.85rem' }}
-                  >
-                    <option value="newest">{t.newestFirst}</option>
-                    <option value="oldest">{t.oldestFirst}</option>
-                    <option value="wins">{t.onlyWins}</option>
-                    <option value="losses">{t.onlyLosses}</option>
-                  </select>
-                </div>
-              )}
-
-              {(() => {
-                const history = profile?.matchHistory || [];
-                const sortedHistory = [...history].sort((a, b) => {
-                  if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
-                  if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
-                  if (sortBy === 'wins') return (b.isWin ? 1 : 0) - (a.isWin ? 1 : 0);
-                  if (sortBy === 'losses') return (a.isWin ? 0 : 1) - (b.isWin ? 0 : 1);
-                  return 0;
-                });
-
-                const itemsPerPage = 5;
-                const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
-                const startIndex = (currentPage - 1) * itemsPerPage;
-                const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
-
-                if (history.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Nema odigranih mečeva.' : 'No matches played yet.'}</div>;
-                }
-
-                return (
-                  <>
-                    <div style={{ minHeight: '150px' }}>
-                      {currentItems.map((m, idx) => (
-                        <div key={idx} className="history-item">
-                          <span>vs <strong>{m.vs}</strong> ({m.date})</span>
-                          <span className={m.isWin ? 'win-text' : 'loss-text'}>{m.isWin ? t.win : t.loss} ({m.score})</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {totalPages > 1 && (
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '12px', alignItems: 'center' }}>
-                        <button
-                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                          disabled={currentPage === 1}
-                          className="tab-btn"
-                          style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === 1 ? 0.4 : 1 }}
-                        >
-                          {t.prevPage}
-                        </button>
-                        <span style={{ fontSize: '0.8rem', color: '#fce055', fontWeight: 'bold' }}>
-                          {currentPage} / {totalPages}
-                        </span>
-                        <button
-                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                          disabled={currentPage === totalPages}
-                          className="tab-btn"
-                          style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === totalPages ? 0.4 : 1 }}
-                        >
-                          {t.nextPage}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          )}
-
-          {profileTab === 'AVATAR_SELECT' && (
-            <div>
-              <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>{t.uploadCustom}</button>
-              <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>
-                {t.editAvatarTitle} — {t.unlocked}: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
-              </p>
-              <div className="avatar-grid" style={{ maxHeight: '240px', overflowY: 'auto', paddingRight: '6px' }}>
-                {getStoredAvatars().map((avItem) => {
-                  const unlockedIds = Array.isArray(profile.unlockedAvatars) ? profile.unlockedAvatars : [];
-                  const isUnlocked = avItem.isDefault || unlockedIds.includes(avItem.id);
-                  const isSelected = profile.avatar === avItem.icon;
-
-                  return (
-                    <div
-                      key={avItem.id} className="avatar-option"
-                      title={isUnlocked ? `${avItem.name}` : `🔒 ${avItem.name} — ${avItem.unlockHint || 'Zaključano'}`}
-                      style={{
-                        opacity: isUnlocked ? 1 : 0.35, filter: isUnlocked ? 'none' : 'grayscale(100%)', cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                        border: isSelected ? '2px solid #22c55e' : '1px solid #334155', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 4px', minHeight: '64px'
-                      }}
-                      onClick={() => {
-                        if (!isUnlocked) return;
-                        updateProfileAndSave({ ...profile, avatar: avItem.icon });
-                        setProfileTab('STATS');
-                      }}
-                    >
-                      <span style={{ fontSize: '1.45rem' }}>{avItem.icon}</span>
-                      <span style={{ fontSize: '0.58rem', color: isUnlocked ? '#e2e8f0' : '#94a3b8', marginTop: '3px', textAlign: 'center', lineHeight: '1.1' }}>
-                        {isUnlocked ? avItem.name : `🔒 ${avItem.unlockHint || 'Zaključano'}`}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
-            </div>
-          )}
+            )}
+
+            {profileTab === 'STATS' && (
+              <div
+                className="info-box"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  margin: 0,
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}
+              >
+                <div className="info-item"><span>{t.rankClass}:</span> <span className="badge-rank">{getRankName(profile.points, lang)}</span></div>
+                {globalRankInfo && (
+                  <div className="info-item">
+                    <span>{lang === 'hr' ? 'Globalni poredak:' : 'Global rank:'}</span>
+                    <strong style={{ color: '#fce055' }}>#{globalRankInfo.rank}</strong>
+                  </div>
+                )}
+                <div className="info-item"><span>{t.totalPoints}:</span> <strong>{profile.points} B</strong></div>
+                <div className="info-item"><span>{t.winRate}:</span> <strong>{winRate}%</strong></div>
+                <div className="info-item"><span>{t.matches}:</span> <strong>{profile.wins} / {profile.losses}</strong></div>
+              </div>
+            )}
+
+            {profileTab === 'BADGES' && (
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', boxSizing: 'border-box' }}>
+                {(() => {
+                  const liveProfile = loadSyncedProfile(currentUser?.email);
+                  const userAchs = (Array.isArray(liveProfile?.achievements) ? liveProfile.achievements : []).map(id => String(id).trim());
+                  const uniqueCatalog = loadFullAchievementsCatalog(achievementsCatalog);
+                  const unlockedList = userAchs.map(achId => uniqueCatalog.find(a => String(a.id).trim() === achId) || { id: achId, title: `Postignuće (${achId})`, desc: 'Ostvareno', icon: '🏅' });
+
+                  if (unlockedList.length === 0) {
+                    return <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Igrač još nema dodijeljenih postignuća.' : 'Player has no achievements yet.'}</div>;
+                  }
+
+                  return unlockedList.map((rawAch) => {
+                    const ach = getLocalizedAchievement(rawAch, lang);
+
+                    return (
+                      <div key={ach.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', borderLeft: '4px solid #22c55e', boxSizing: 'border-box' }}>
+                        <div style={{ fontSize: '1.4rem' }}>{ach.icon || '🏅'}</div>
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: '#f8fafc' }}>{ach.title || ach.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ach.description || ach.desc}</div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+
+            {profileTab === 'HISTORY' && (
+              <div style={{ width: '100%', boxSizing: 'border-box' }}>
+                {profile?.matchHistory && profile.matchHistory.length > 0 && (
+                  <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{t.sortBy}</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
+                      style={{ background: '#071524', color: '#fff', border: '1px solid #d4af37', padding: '4px 8px', borderRadius: '6px', fontSize: '0.85rem' }}
+                    >
+                      <option value="newest">{t.newestFirst}</option>
+                      <option value="oldest">{t.oldestFirst}</option>
+                      <option value="wins">{t.onlyWins}</option>
+                      <option value="losses">{t.onlyLosses}</option>
+                    </select>
+                  </div>
+                )}
+
+                {(() => {
+                  const history = profile?.matchHistory || [];
+                  const sortedHistory = [...history].sort((a, b) => {
+                    if (sortBy === 'newest') return new Date(b.date) - new Date(a.date);
+                    if (sortBy === 'oldest') return new Date(a.date) - new Date(b.date);
+                    if (sortBy === 'wins') return (b.isWin ? 1 : 0) - (a.isWin ? 1 : 0);
+                    if (sortBy === 'losses') return (a.isWin ? 0 : 1) - (b.isWin ? 0 : 1);
+                    return 0;
+                  });
+
+                  const itemsPerPage = 4;
+                  const totalPages = Math.ceil(sortedHistory.length / itemsPerPage);
+                  const startIndex = (currentPage - 1) * itemsPerPage;
+                  const currentItems = sortedHistory.slice(startIndex, startIndex + itemsPerPage);
+
+                  if (history.length === 0) {
+                    return <div style={{ textAlign: 'center', padding: '15px', color: '#94a3b8', fontSize: '0.85rem' }}>{lang === 'hr' ? 'Nema odigranih mečeva.' : 'No matches played yet.'}</div>;
+                  }
+
+                  return (
+                    <>
+                      <div style={{ minHeight: '148px' }}>
+                        {currentItems.map((m, idx) => {
+                          const displayDate = /\.\d{4}\.?$/.test(m.date || '')
+                            ? m.date
+                            : `${(m.date || '').replace(/\.$/, '')}.${new Date().getFullYear()}.`;
+                          return (
+                            <div key={idx} className="history-item">
+                              <span>vs <strong>{m.vs}</strong> ({displayDate})</span>
+                              <span className={m.isWin ? 'win-text' : (m.isDraw ? '' : 'loss-text')} style={m.isDraw ? { color: '#facc15', fontWeight: 'bold' } : undefined}>
+                                {m.isDraw ? (lang === 'hr' ? 'Remi' : 'Draw') : (m.isWin ? t.win : t.loss)} ({m.score})
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {totalPages > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '10px', alignItems: 'center' }}>
+                          <button
+                            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                            disabled={currentPage === 1}
+                            className="tab-btn"
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === 1 ? 0.4 : 1 }}
+                          >
+                            {t.prevPage}
+                          </button>
+                          <span style={{ fontSize: '0.8rem', color: '#fce055', fontWeight: 'bold' }}>
+                            {currentPage} / {totalPages}
+                          </span>
+                          <button
+                            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                            disabled={currentPage === totalPages}
+                            className="tab-btn"
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', opacity: currentPage === totalPages ? 0.4 : 1 }}
+                          >
+                            {t.nextPage}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {profileTab === 'AVATAR_SELECT' && (
+              <div style={{ width: '100%', boxSizing: 'border-box' }}>
+                <button className="upload-avatar-btn" onClick={() => fileInputRef.current.click()}>{t.uploadCustom}</button>
+                <p style={{ fontSize: '0.85rem', color: '#fce055', marginBottom: '10px' }}>
+                  {t.editAvatarTitle} — {t.unlocked}: {(profile.unlockedAvatars || []).length} / {avatarsCatalog.length}
+                </p>
+                <div className="avatar-grid no-scrollbar" style={{ maxHeight: '185px', overflowY: 'auto', paddingRight: '6px' }}>
+                  {getStoredAvatars().map((avItem) => {
+                    const unlockedIds = Array.isArray(profile.unlockedAvatars) ? profile.unlockedAvatars : [];
+                    const isUnlocked = avItem.isDefault || unlockedIds.includes(avItem.id);
+                    const isSelected = profile.avatar === avItem.icon;
+
+                    return (
+                      <div
+                        key={avItem.id} className="avatar-option"
+                        title={isUnlocked ? `${avItem.name}` : `🔒 ${avItem.name} — ${avItem.unlockHint || 'Zaključano'}`}
+                        style={{
+                          opacity: isUnlocked ? 1 : 0.35, filter: isUnlocked ? 'none' : 'grayscale(100%)', cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                          border: isSelected ? '2px solid #22c55e' : '1px solid #334155', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 4px', minHeight: '64px'
+                        }}
+                        onClick={() => {
+                          if (!isUnlocked) return;
+                          updateProfileAndSave({ ...profile, avatar: avItem.icon });
+                          setProfileTab('STATS');
+                        }}
+                      >
+                        <span style={{ fontSize: '1.45rem' }}>{avItem.icon}</span>
+                        <span style={{ fontSize: '0.58rem', color: isUnlocked ? '#e2e8f0' : '#94a3b8', marginTop: '3px', textAlign: 'center', lineHeight: '1.1' }}>
+                          {isUnlocked ? avItem.name : `🔒 ${avItem.unlockHint || 'Zaključano'}`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'center' }}>
             <button className="btn-menu btn-back" style={{ flex: 1, margin: 0 }} onClick={() => setCurrentScreen('MAIN_MENU')}>
@@ -2316,7 +3031,7 @@ export default function App() {
       {currentScreen === 'RANKING' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.rankingTitle}</h2>
-          <div className="info-box" style={{ maxHeight: '260px', overflowY: 'auto' }}>
+          <div className="info-box no-scrollbar" style={{ maxHeight: '260px', overflowY: 'auto' }}>
             {RANK_STEPS.map((r, i) => (
               <div key={i} className="info-item">
                 <span>{lang === 'hr' ? r.hr : r.en}</span>
@@ -2332,6 +3047,17 @@ export default function App() {
       {currentScreen === 'LEADERBOARD' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.leaderboard}</h2>
+          {globalRankInfo && (
+            <div style={{
+              marginBottom: '10px', padding: '8px 12px', borderRadius: '8px',
+              backgroundColor: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.35)',
+              fontSize: '0.86rem', color: '#fce055', fontWeight: 'bold', textAlign: 'center'
+            }}>
+              {lang === 'hr'
+                ? `Tvoj trenutni rang: #${globalRankInfo.rank}`
+                : `Your current rank: #${globalRankInfo.rank}`}
+            </div>
+          )}
           <table className="leaderboard-table">
             <thead>
               <tr><th>#</th><th>{lang === 'hr' ? 'Igrač' : 'Player'}</th><th>{lang === 'hr' ? 'Bodovi' : 'Points'}</th></tr>
@@ -2361,7 +3087,7 @@ export default function App() {
       {currentScreen === 'SCORING' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.scoringTitle}</h2>
-          <div className="info-box" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
+          <div className="info-box no-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
             {t.scoringRulesList.map((rule) => (
               <div key={rule.id} className="info-item" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '1.1rem' }}>{rule.icon}</span>
@@ -2378,12 +3104,50 @@ export default function App() {
       {currentScreen === 'SETTINGS' && (
         <div className="menu-card" onClick={(e) => e.stopPropagation()}>
           <h2 className="menu-title">{t.settings}</h2>
-          <div className="info-box">
+          <div className="info-box" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div className="info-item">
               <span>{t.soundEffects}:</span>
               <button className="lang-btn" onClick={() => setSoundEnabled(!soundEnabled)}>
                 {soundEnabled ? t.on : t.off}
               </button>
+            </div>
+
+            <div className="info-item">
+              <span>{lang === 'hr' ? 'Pozadinska glazba:' : 'Background music:'}</span>
+              <button
+                type="button"
+                className="lang-btn"
+                onClick={() => {
+                  const next = !musicEnabled;
+                  setMusicEnabled(next);
+                  if (next) ambientMusicPlayer.start(true, musicVolume);
+                  else ambientMusicPlayer.stop();
+                }}
+              >
+                {musicEnabled ? t.on : t.off}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                <span>{lang === 'hr' ? 'Glasnoća glazbe:' : 'Music volume:'}</span>
+                <strong style={{ color: '#fce055' }}>{musicVolume} / 100</strong>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={musicVolume}
+                disabled={!musicEnabled}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setMusicVolume(val);
+                  if (musicEnabled) {
+                    ambientMusicPlayer.start(true, val);
+                  }
+                }}
+                style={{ width: '100%', accentColor: '#d4af37', cursor: musicEnabled ? 'pointer' : 'not-allowed' }}
+              />
             </div>
           </div>
           <button className="btn-menu btn-back" onClick={() => setCurrentScreen('MAIN_MENU')}>{t.back}</button>
@@ -2426,7 +3190,7 @@ export default function App() {
                   ))}
                 </div>
 
-                <div style={{ maxHeight: '50vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                <div className="no-scrollbar" style={{ maxHeight: '50vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                   {fullCat
                     .filter(rawAch => {
                       const isUnlocked = userAchs.includes(String(rawAch.id).trim());
@@ -2453,7 +3217,7 @@ export default function App() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ fontWeight: 'bold', color: isUnlocked ? '#f8fafc' : '#94a3b8', fontSize: '0.95rem' }}>{ach.title || ach.name}</span>
                               <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', padding: '2px 6px', borderRadius: '4px', background: tierInfo.border, color: '#000', fontWeight: 'bold' }}>
-                                {tierInfo.label}
+                                {getLocalizedTierLabel(ach.tier, lang)}
                               </span>
                             </div>
                             <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>{ach.desc || ach.description}</div>
@@ -2529,17 +3293,57 @@ export default function App() {
                 {setupStep === 'COIN_TOSS' && (
                   <>
                     <h2>{t.titleCoin}</h2>
-                    <p><strong>{p1Name}</strong> {t.coinPrompt}</p>
-                    <div className="coin-stage">
-                      <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
-                        <div className="coin-face front">{t.heads}</div>
-                        <div className="coin-face back" style={{ background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)', color: '#0f172a', border: '3px solid #e2e8f0' }}>{t.tails}</div>
-                      </div>
-                    </div>
-                    <div className="coin-choice-btns">
-                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>
-                      <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#071524' }}>{t.tails}</button>
-                    </div>
+                    {Boolean(onlineGameId) && !isAIMode ? (
+                      (() => {
+                        const resolvedMyColor = myColor || sessionStorage.getItem('mlin_my_color') || 'WHITE';
+                        const isMyTurnToToss = resolvedMyColor === onlineCoinTosserColor;
+                        const tosserName = players[onlineCoinTosserColor]?.name || (onlineCoinTosserColor === 'WHITE' ? 'Bijeli' : 'Crni');
+
+                        return (
+                          <>
+                            <p>
+                              {isMyTurnToToss
+                                ? (lang === 'hr'
+                                  ? 'Nasumični ždrijeb dodijelio je vama bacanje novčića! Odaberite:'
+                                  : 'Random draw gave you the coin toss! Make your call:')
+                                : (lang === 'hr'
+                                  ? `Nasumični igrač (${tosserName}) baca novčić i određuje tko igra prvi...`
+                                  : `Random player (${tosserName}) is flipping the coin to decide who starts...`)}
+                            </p>
+                            <div className="coin-stage">
+                              <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
+                                <div className="coin-face front">{t.heads}</div>
+                                <div className="coin-face back" style={{ background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)', color: '#0f172a', border: '3px solid #e2e8f0' }}>{t.tails}</div>
+                              </div>
+                            </div>
+                            {isMyTurnToToss ? (
+                              <div className="coin-choice-btns">
+                                <button className="btn-gold" disabled={isFlipping || onlineCoinDone} onClick={() => handleOnlineCoinToss('heads')}>{t.heads}</button>
+                                <button className="btn-gold" disabled={isFlipping || onlineCoinDone} onClick={() => handleOnlineCoinToss('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#071524' }}>{t.tails}</button>
+                              </div>
+                            ) : (
+                              <div style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 'bold', marginTop: '8px' }}>
+                                ⏳ {onlineCoinChoice ? (lang === 'hr' ? `Odabrano: ${onlineCoinChoice === 'heads' ? t.heads : t.tails}` : `Called: ${onlineCoinChoice === 'heads' ? t.heads : t.tails}`) : (lang === 'hr' ? 'Čekanje odabira...' : 'Waiting for call...')}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <>
+                        <p><strong>{p1Name}</strong> {t.coinPrompt}</p>
+                        <div className="coin-stage">
+                          <div className="coin-3d" style={{ transform: `rotateY(${coinRotation}deg)` }}>
+                            <div className="coin-face front">{t.heads}</div>
+                            <div className="coin-face back" style={{ background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%)', color: '#0f172a', border: '3px solid #e2e8f0' }}>{t.tails}</div>
+                          </div>
+                        </div>
+                        <div className="coin-choice-btns">
+                          <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('heads')}>{t.heads}</button>
+                          <button className="btn-gold" disabled={isFlipping} onClick={() => triggerCoinFlip('tails')} style={{ background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)', color: '#071524' }}>{t.tails}</button>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -2561,7 +3365,7 @@ export default function App() {
           {setupStep === 'PLAY' && (
             <>
               <div className="status-bar" onClick={(e) => e.stopPropagation()}>
-                {disconnectSeconds > 0 && !winner && (
+                {Boolean(onlineGameId) && disconnectSeconds > 0 && !winner && !isDrawGame && (
                   <div style={{
                     background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', color: '#fca5a5',
                     padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '8px'
@@ -2574,12 +3378,79 @@ export default function App() {
 
                 {winner ? (
                   <div className="status-turn" style={{ color: '#4ade80' }}>{t.gameOverWinner} {players[winner].name}!</div>
+                ) : isDrawGame ? (
+                  <div className="status-turn" style={{ color: '#facc15' }}>
+                    {lang === 'hr' ? '🤝 Partija je završila neriješeno (Remi — podjela bodova)!' : '🤝 Match ended in a Draw (Split points)!'}
+                  </div>
                 ) : (
                   <>
-                    <div className="status-turn">
-                      {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
+                    <div className="status-turn" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
+                      <span>
+                        {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
+                      </span>
+                      {bothAtThreePieces && (
+                        <span style={{
+                          padding: '2px 10px',
+                          borderRadius: '999px',
+                          fontSize: '0.85rem',
+                          fontWeight: 'bold',
+                          fontFamily: 'monospace',
+                          backgroundColor: remainingNoMillMoves <= 8 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(250, 204, 21, 0.16)',
+                          border: remainingNoMillMoves <= 8 ? '1px solid #ef4444' : '1px solid #facc15',
+                          color: remainingNoMillMoves <= 8 ? '#fca5a5' : '#fde047'
+                        }}>
+                          {lang === 'hr'
+                            ? `Bez mlina: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`
+                            : `No mill: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`}
+                        </span>
+                      )}
                     </div>
+
                     {mustRemove && <div className="status-alert">{t.alertRemove}</div>}
+
+                    {drawNotice && !drawOfferBy && (
+                      <div style={{ color: '#fde047', fontSize: '0.8rem', fontWeight: 'bold', marginTop: '6px' }}>
+                        {drawNotice}
+                      </div>
+                    )}
+
+                    {drawOfferBy && (
+                      <div style={{
+                        marginTop: '8px', padding: '8px 12px', borderRadius: '8px',
+                        background: 'rgba(250, 204, 21, 0.14)', border: '1px solid #facc15',
+                        color: '#fef08a', fontSize: '0.82rem', display: 'flex', flexWrap: 'wrap',
+                        alignItems: 'center', justifyContent: 'center', gap: '8px'
+                      }}>
+                        <span>
+                          {lang === 'hr'
+                            ? `🤝 ${players[drawOfferBy]?.name || drawOfferBy} nudi remi (podjela +${DRAW_SPLIT_POINTS} bodova).`
+                            : `🤝 ${players[drawOfferBy]?.name || drawOfferBy} offers a draw (+${DRAW_SPLIT_POINTS} points each).`}
+                        </span>
+                        {canRespondToDrawOffer ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleRespondDrawOffer(true)}
+                              style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 'bold', cursor: 'pointer' }}
+                            >
+                              {lang === 'hr' ? '✓ Prihvati' : '✓ Accept'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRespondDrawOffer(false)}
+                              style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 'bold', cursor: 'pointer' }}
+                            >
+                              {lang === 'hr' ? '✕ Odbij' : '✕ Decline'}
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>
+                            {lang === 'hr' ? '⏳ Čekanje odgovora...' : '⏳ Waiting for response...'}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     {gameCategory === 'COMPETITIVE' && (
                       <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0' }}>
                         <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{ padding: '6px 14px', borderRadius: '8px', background: turn === 'WHITE' ? '#1e293b' : '#0f172a', border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
@@ -2592,20 +3463,37 @@ export default function App() {
                     )}
                   </>
                 )}
-                <button
-                  className="btn-menu btn-back"
-                  style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.85rem' }}
-                  onClick={() => {
-                    if (!winner) {
-                      applyAbandonPenalty('QUIT');
-                    } else {
-                      setCurrentScreen('MAIN_MENU');
-                      if (onlineGameId) navigate('/');
-                    }
-                  }}
-                >
-                  {t.btnQuit}
-                </button>
+
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  {!winner && !isDrawGame && !drawOfferBy && bothAtThreePieces && (
+                    <button
+                      type="button"
+                      onClick={handleOfferDraw}
+                      style={{
+                        background: 'rgba(250, 204, 21, 0.16)', color: '#fde047',
+                        border: '1px solid #eab308', borderRadius: '8px',
+                        padding: '6px 12px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer'
+                      }}
+                    >
+                      {lang === 'hr' ? '🤝 Ponudi remi' : '🤝 Offer Draw'}
+                    </button>
+                  )}
+
+                  <button
+                    className="btn-menu btn-back"
+                    style={{ margin: 0, padding: '6px 12px', fontSize: '0.85rem' }}
+                    onClick={() => {
+                      if (!winner && !isDrawGame) {
+                        applyAbandonPenalty('QUIT');
+                      } else {
+                        setCurrentScreen('MAIN_MENU');
+                        if (onlineGameId) navigate('/');
+                      }
+                    }}
+                  >
+                    {t.btnQuit}
+                  </button>
+                </div>
               </div>
 
               <div className="main-play-area">
@@ -2631,11 +3519,17 @@ export default function App() {
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p1Color];
-                      const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color) && (!onlineGameId || turn === myColor);
+                      const isLastMovePiece = isPieceAvailable && lastMove[p1Color]?.to === i;
+                      const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color) && (!onlineGameId || isAIMode || turn === myColor);
                       return (
                         <div
                           key={`p1-slot-${i}`}
                           className={`piece-slot ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
+                          style={isLastMovePiece ? {
+                            outline: '2px solid #38bdf8',
+                            outlineOffset: '2px',
+                            boxShadow: '0 0 10px rgba(56, 189, 248, 0.85)'
+                          } : undefined}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
@@ -2648,21 +3542,31 @@ export default function App() {
                       );
                     })}
                   </div>
+                  <div style={{
+                    marginTop: '8px', padding: '5px 7px', borderRadius: '7px',
+                    background: 'rgba(15, 23, 42, 0.75)', border: '1px solid #334155',
+                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center'
+                  }}>
+                    <span style={{ color: '#94a3b8' }}>{lang === 'hr' ? 'Zadnji potez:' : 'Last move:'} </span>
+                    <strong style={{ color: '#38bdf8' }}>
+                      {lastMove[p1Color]?.text || (lang === 'hr' ? '—' : '—')}
+                    </strong>
+                  </div>
                 </div>
 
                 <Board
                   board={board} selectedNode={currentActiveNode} validMoves={validMoves} removableNodes={removableNodes} mustRemove={mustRemove}
-                  turn={turn} isAIMode={onlineGameId ? false : isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
+                  turn={turn} isAIMode={isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
                   theme={activeBoardTheme}
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
-                    if (onlineGameId && turn !== myColor) return;
+                    if (onlineGameId && !isAIMode && turn !== myColor) return;
                     if (selectedNode === targetIdx) { handleCancelSelection(); return; }
                     setKeyboardFocusNode(targetIdx);
                     executePlaceOrMove(targetIdx);
                   }}
                   onNodePick={(nodeIdx) => {
-                    if (onlineGameId && turn !== myColor) return;
+                    if (onlineGameId && !isAIMode && turn !== myColor) return;
                     if (mustRemove) { executePlaceOrMove(nodeIdx); return; }
                     if (selectedNode === nodeIdx) { handleCancelSelection(); return; }
                     playAudioEffect('pickup', soundEnabled);
@@ -2688,11 +3592,17 @@ export default function App() {
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p2Color];
-                      const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color) && (!onlineGameId || turn === myColor);
+                      const isLastMovePiece = isPieceAvailable && lastMove[p2Color]?.to === i;
+                      const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color) && (!onlineGameId || isAIMode || turn === myColor);
                       return (
                         <div
                           key={`p2-slot-${i}`}
                           className={`piece-slot ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
+                          style={isLastMovePiece ? {
+                            outline: '2px solid #fbbf24',
+                            outlineOffset: '2px',
+                            boxShadow: '0 0 10px rgba(251, 191, 36, 0.85)'
+                          } : undefined}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
@@ -2705,6 +3615,16 @@ export default function App() {
                       );
                     })}
                   </div>
+                  <div style={{
+                    marginTop: '8px', padding: '5px 7px', borderRadius: '7px',
+                    background: 'rgba(15, 23, 42, 0.75)', border: '1px solid #334155',
+                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center'
+                  }}>
+                    <span style={{ color: '#94a3b8' }}>{lang === 'hr' ? 'Zadnji potez:' : 'Last move:'} </span>
+                    <strong style={{ color: '#fbbf24' }}>
+                      {lastMove[p2Color]?.text || (lang === 'hr' ? '—' : '—')}
+                    </strong>
+                  </div>
                 </div>
 
                 <div className="captured-tray tray-right">
@@ -2714,11 +3634,17 @@ export default function App() {
                 </div>
               </div>
 
-              {winner && matchSummary && (
+              {(winner || isDrawGame) && matchSummary && (
                 <div onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(6, 11, 22, 0.88)', backdropFilter: 'blur(6px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200, padding: '16px' }}>
-                  <div style={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '18px', padding: '24px 28px', width: '100%', maxWidth: '820px', boxShadow: '0 24px 60px rgba(0,0,0,0.85)', color: '#f8fafc', textAlign: 'center', maxHeight: '92vh', overflowY: 'auto' }}>
+                  <div className="no-scrollbar" style={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '18px', padding: '24px 28px', width: '100%', maxWidth: '820px', boxShadow: '0 24px 60px rgba(0,0,0,0.85)', color: '#f8fafc', textAlign: 'center', maxHeight: '92vh', overflowY: 'auto' }}>
                     <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#fbbf24', fontWeight: 'bold' }}>{lang === 'hr' ? '⚡ Sažetak Meča i Osvojenih Nagrada' : '⚡ Match Summary & Rewards'}</div>
-                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>🏆 {lang === 'hr' ? 'Pobjednik:' : 'Winner:'} <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span></h2>
+                    <h2 style={{ fontSize: '1.65rem', color: '#fff', margin: '6px 0 18px 0' }}>
+                      {matchSummary.isDraw ? (
+                        <>🤝 {lang === 'hr' ? 'Ishod:' : 'Result:'} <span style={{ color: '#facc15' }}>{matchSummary.winnerName}</span></>
+                      ) : (
+                        <>🏆 {lang === 'hr' ? 'Pobjednik:' : 'Winner:'} <span style={{ color: '#4ade80' }}>{matchSummary.winnerName}</span></>
+                      )}
+                    </h2>
 
                     <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: '20px', marginBottom: '22px', flexWrap: 'wrap' }}>
                       {renderPlayerExperienceColumn(matchSummary.leftPlayer, lang === 'hr' ? 'Igrač 1' : 'Player 1')}
@@ -2736,7 +3662,7 @@ export default function App() {
 
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
                       <button type="button" onClick={() => { if (isAIMode) startAIGame(aiDifficulty); else startCouchGame(); }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🔄 {lang === 'hr' ? 'Igraj ponovno' : 'Play Again'}</button>
-                      <button type="button" onClick={() => { setWinner(null); setMatchSummary(null); setCurrentScreen('MAIN_MENU'); }} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🏠 {lang === 'hr' ? 'Glavni izbornik' : 'Main Menu'}</button>
+                      <button type="button" onClick={() => { setWinner(null); setIsDrawGame(false); setMatchSummary(null); setCurrentScreen('MAIN_MENU'); }} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer' }}>🏠 {lang === 'hr' ? 'Glavni izbornik' : 'Main Menu'}</button>
                     </div>
                   </div>
                 </div>
