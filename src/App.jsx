@@ -30,6 +30,7 @@ import { TRANSLATIONS } from './translations';
 import { profileSchema, playerNameSchema, authSchema } from './validators';
 import { getPlayerTitle, getPlayerTitleTierClass } from './titlesData';
 import { startOnlineMatchmaking } from './onlineMatchmaking';
+import { adventureMusicPlayer } from './audio/adventureMusic';
 
 const ABANDON_PENALTY_POINTS = 15; // Više od standardnog poraza (-6), nikad ispod 0
 const OFFLINE_ABANDON_SECONDS = 30;
@@ -103,77 +104,105 @@ const playAudioEffect = (type, soundEnabled = true) => {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const now = ctx.currentTime;
     if (type === 'pickup') {
+      adventureMusicPlayer.duckForEffect(140);
       const osc = ctx.createOscillator(); const gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = 'sine'; osc.frequency.setValueAtTime(260, now);
-      osc.frequency.exponentialRampToValueAtTime(520, now + 0.08);
-      gain.gain.setValueAtTime(0.25, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+      osc.type = 'sine'; osc.frequency.setValueAtTime(240, now);
+      osc.frequency.exponentialRampToValueAtTime(380, now + 0.08);
+      gain.gain.setValueAtTime(0.14, now); gain.gain.exponentialRampToValueAtTime(0.004, now + 0.08);
       osc.start(); osc.stop(now + 0.08);
     } else if (type === 'place') {
+      adventureMusicPlayer.duckForEffect(180);
       const osc = ctx.createOscillator(); const gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = 'triangle'; osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(45, now + 0.12);
-      gain.gain.setValueAtTime(0.4, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(160, now);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 0.12);
+      gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.004, now + 0.12);
       osc.start(); osc.stop(now + 0.12);
     } else if (type === 'matchFound') {
-      const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        osc.connect(ctx.destination);
-        osc.type = idx % 2 === 0 ? 'triangle' : 'sine';
-        const startAt = now + idx * 0.085;
-        const dur = idx === notes.length - 1 ? 0.36 : 0.16;
-        osc.frequency.setValueAtTime(freq, startAt);
-        gain.gain.setValueAtTime(0.001, startAt);
-        gain.gain.linearRampToValueAtTime(0.16, startAt + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
-        osc.start(startAt);
-        osc.stop(startAt + dur + 0.02);
-      });
-    } else if (type === 'coinSpin') {
-      for (let i = 0; i < 14; i++) {
-        const osc = ctx.createOscillator(); const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'sine'; osc.frequency.setValueAtTime(700 + Math.random() * 300, now + i * 0.14);
-        gain.gain.setValueAtTime(0.02, now + i * 0.14); gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.14 + 0.05);
-        osc.start(now + i * 0.14); osc.stop(now + i * 0.14 + 0.05);
-      }
-    } else if (type === 'coinLand') {
-      const osc = ctx.createOscillator(); const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = 'sine'; osc.frequency.setValueAtTime(1100, now);
-      osc.frequency.exponentialRampToValueAtTime(250, now + 0.12);
-      gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-      osc.start(); osc.stop(now + 0.12);
-    } else if (type === 'victory') {
-      const notes = [523.25, 659.25, 783.99, 1046.50];
+      adventureMusicPlayer.duckForEffect(650);
+      const notes = [261.63, 329.63, 392.00, 523.25];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
         osc.connect(ctx.destination);
         osc.type = 'triangle';
+        const startAt = now + idx * 0.095;
+        const dur = idx === notes.length - 1 ? 0.34 : 0.16;
+        osc.frequency.setValueAtTime(freq, startAt);
+        gain.gain.setValueAtTime(0.001, startAt);
+        gain.gain.linearRampToValueAtTime(0.11, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
+        osc.start(startAt);
+        osc.stop(startAt + dur + 0.02);
+      });
+    } else if (type === 'coinSpin') {
+      adventureMusicPlayer.duckForEffect(900);
+      for (let i = 0; i < 10; i++) {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'sine'; osc.frequency.setValueAtTime(340 + i * 18, now + i * 0.12);
+        gain.gain.setValueAtTime(0.015, now + i * 0.12); gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.05);
+        osc.start(now + i * 0.12); osc.stop(now + i * 0.12 + 0.05);
+      }
+    } else if (type === 'coinLand') {
+      adventureMusicPlayer.duckForEffect(200);
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(392.00, now);
+      osc.frequency.exponentialRampToValueAtTime(196.00, now + 0.14);
+      gain.gain.setValueAtTime(0.11, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+      osc.start(); osc.stop(now + 0.14);
+    } else if (type === 'victory') {
+      // Ugodan i veseo akordni niz u C-duru / G-duru, blagog intenziteta
+      adventureMusicPlayer.duckForEffect(850);
+      const notes = [261.63, 329.63, 392.00, 493.88, 523.25];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const overtone = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const overGain = ctx.createGain();
+
+        osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, now + idx * 0.12);
-        const duration = idx === notes.length - 1 ? 0.35 : 0.11;
-        gain.gain.setValueAtTime(0.25, now + idx * 0.12);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + duration);
-        osc.start(now + idx * 0.12);
-        osc.stop(now + idx * 0.12 + duration);
+
+        overtone.type = 'triangle';
+        overtone.frequency.setValueAtTime(freq * 1.5, now + idx * 0.12);
+
+        const startAt = now + idx * 0.12;
+        const duration = idx === notes.length - 1 ? 0.48 : 0.22;
+
+        gain.gain.setValueAtTime(0.0005, startAt);
+        gain.gain.linearRampToValueAtTime(0.095, startAt + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0005, startAt + duration);
+
+        overGain.gain.setValueAtTime(0.0003, startAt);
+        overGain.gain.linearRampToValueAtTime(0.025, startAt + 0.04);
+        overGain.gain.exponentialRampToValueAtTime(0.0003, startAt + duration * 0.85);
+
+        osc.connect(gain);
+        overtone.connect(overGain);
+        gain.connect(ctx.destination);
+        overGain.connect(ctx.destination);
+
+        osc.start(startAt);
+        overtone.start(startAt);
+        osc.stop(startAt + duration + 0.03);
+        overtone.stop(startAt + duration + 0.03);
       });
     } else if (type === 'defeat') {
-      const tones = [440, 370, 280];
+      adventureMusicPlayer.duckForEffect(650);
+      const tones = [246.94, 220.00, 174.61];
       tones.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
         osc.connect(ctx.destination);
-        osc.type = 'sawtooth';
+        osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, now + idx * 0.18);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.85, now + idx * 0.18 + 0.17);
-        gain.gain.setValueAtTime(0.2, now + idx * 0.18);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.92, now + idx * 0.18 + 0.17);
+        gain.gain.setValueAtTime(0.12, now + idx * 0.18);
         gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.18 + 0.17);
         osc.start(now + idx * 0.18);
         osc.stop(now + idx * 0.18 + 0.17);
@@ -181,116 +210,6 @@ const playAudioEffect = (type, soundEnabled = true) => {
     }
   } catch (e) { }
 };
-
-// Lagani instrumentalni generator pozadinske glazbe (Web Audio API) s promjenom intenziteta
-class AmbientMusicPlayer {
-  constructor() {
-    this.ctx = null;
-    this.masterGain = null;
-    this.timer = null;
-    this.step = 0;
-    this.isPlaying = false;
-    this.intensity = 'calm';
-    this.volume = 0.35;
-    this.sessionId = 0;
-  }
-
-  setVolume(vol0to100) {
-    this.volume = Math.max(0, Math.min(1, Number(vol0to100) / 100));
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-      this.masterGain.gain.setTargetAtTime(this.isPlaying ? this.volume * 0.18 : 0, this.ctx.currentTime, 0.03);
-    }
-  }
-
-  setIntensity(level) {
-    this.intensity = level;
-  }
-
-  start(enabled, vol0to100) {
-    this.setVolume(vol0to100);
-    if (!enabled || Number(vol0to100) <= 0) {
-      this.stop();
-      return;
-    }
-
-    try {
-      if (!this.ctx) {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        this.ctx = new AudioCtx();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = this.volume * 0.18;
-        this.masterGain.connect(this.ctx.destination);
-      }
-
-      if (this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
-      }
-
-      if (this.isPlaying) return;
-
-      this.isPlaying = true;
-      const currentSession = ++this.sessionId;
-      this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-      this.masterGain.gain.setTargetAtTime(this.volume * 0.18, this.ctx.currentTime, 0.08);
-
-      const scales = {
-        calm: [261.63, 329.63, 392.00, 493.88, 523.25, 392.00, 329.63, 293.66],
-        lively: [293.66, 369.99, 440.00, 587.33, 659.25, 587.33, 440.00, 369.99],
-        intense: [329.63, 392.00, 493.88, 659.25, 783.99, 659.25, 587.33, 493.88]
-      };
-
-      const tick = () => {
-        if (!this.isPlaying || currentSession !== this.sessionId || !this.ctx) return;
-
-        const notes = scales[this.intensity] || scales.calm;
-        const freq = notes[this.step % notes.length];
-        const now = this.ctx.currentTime;
-
-        const osc = this.ctx.createOscillator();
-        const noteGain = this.ctx.createGain();
-        osc.type = this.intensity === 'intense' ? 'triangle' : 'sine';
-        osc.frequency.setValueAtTime(freq, now);
-
-        const duration = this.intensity === 'intense' ? 0.45 : this.intensity === 'lively' ? 0.65 : 0.95;
-        noteGain.gain.setValueAtTime(0.001, now);
-        noteGain.gain.linearRampToValueAtTime(this.intensity === 'intense' ? 0.45 : 0.3, now + 0.06);
-        noteGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-        osc.connect(noteGain);
-        noteGain.connect(this.masterGain);
-        osc.start(now);
-        osc.stop(now + duration + 0.03);
-
-        this.step += 1;
-        const nextDelay = this.intensity === 'intense' ? 420 : this.intensity === 'lively' ? 620 : 950;
-        this.timer = setTimeout(tick, nextDelay);
-      };
-
-      tick();
-    } catch (e) {}
-  }
-
-  stop() {
-    this.isPlaying = false;
-    this.sessionId += 1;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    if (this.masterGain && this.ctx) {
-      try {
-        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-        this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
-      } catch (e) {}
-    }
-    if (this.ctx && this.ctx.state === 'running') {
-      this.ctx.suspend().catch(() => {});
-    }
-  }
-}
-
-const ambientMusicPlayer = new AmbientMusicPlayer();
 
 const loadSyncedProfile = (userEmail = null) => {
   const defaultAvatars = getDefaultUnlockedAvatarIds();
@@ -551,10 +470,13 @@ export default function App() {
       localStorage.setItem('mlin_music_volume', String(musicVolume));
     } catch (e) {}
 
+    const isPlayingNow = currentScreen === 'GAME' && setupStep === 'PLAY';
+    adventureMusicPlayer.setMode(isPlayingNow ? 'game' : 'menu');
+
     let level = 'calm';
     if (currentScreen === 'ONLINE_SEARCH') {
       level = 'lively';
-    } else if (currentScreen === 'GAME' && setupStep === 'PLAY') {
+    } else if (isPlayingNow) {
       const wCount = board.filter(c => c === 'WHITE').length;
       const bCount = board.filter(c => c === 'BLACK').length;
       if (turnCount > 24 || wCount <= 4 || bCount <= 4) {
@@ -563,18 +485,19 @@ export default function App() {
         level = 'lively';
       }
     }
-    ambientMusicPlayer.setIntensity(level);
-
-    const unlockAndPlay = () => {
-      ambientMusicPlayer.start(musicEnabled, musicVolume);
-    };
+    adventureMusicPlayer.setIntensity(level);
 
     if (!currentUser || !musicEnabled || musicVolume <= 0) {
-      ambientMusicPlayer.stop();
+      adventureMusicPlayer.stop();
       return;
     }
 
-    ambientMusicPlayer.start(musicEnabled, musicVolume);
+    adventureMusicPlayer.start(true, musicVolume);
+    const unlockAndPlay = () => {
+      if (musicEnabled && musicVolume > 0 && currentUser) {
+        adventureMusicPlayer.start(true, musicVolume);
+      }
+    };
     window.addEventListener('pointerdown', unlockAndPlay, { once: true });
 
     return () => {
@@ -718,7 +641,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    ambientMusicPlayer.stop();
+    adventureMusicPlayer.stop();
     await signOut(auth);
     setCurrentScreen('MAIN_MENU');
   };
@@ -2009,7 +1932,9 @@ export default function App() {
         ...lastMove,
         [turn]: {
           type: 'REMOVE',
+          from: null,
           to: nodeIndex,
+          color: turn,
           text: lang === 'hr' ? `Uklonjeno na čvor #${nodeIndex + 1}` : `Removed on node #${nodeIndex + 1}`
         }
       };
@@ -2058,7 +1983,9 @@ export default function App() {
         ...lastMove,
         [turn]: {
           type: 'PLACE',
+          from: null,
           to: nodeIndex,
+          color: turn,
           text: formedMill
             ? (lang === 'hr' ? `Postavljeno #${nodeIndex + 1} (MLIN!)` : `Placed #${nodeIndex + 1} (MILL!)`)
             : (lang === 'hr' ? `Postavljeno na #${nodeIndex + 1}` : `Placed on #${nodeIndex + 1}`)
@@ -2131,6 +2058,7 @@ export default function App() {
             type: 'MOVE',
             from: source,
             to: nodeIndex,
+            color: turn,
             text: formedMill
               ? (lang === 'hr' ? `#${source + 1} → #${nodeIndex + 1} (MLIN!)` : `#${source + 1} → #${nodeIndex + 1} (MILL!)`)
               : (lang === 'hr' ? `#${source + 1} → #${nodeIndex + 1}` : `#${source + 1} → #${nodeIndex + 1}`)
@@ -3120,8 +3048,12 @@ export default function App() {
                 onClick={() => {
                   const next = !musicEnabled;
                   setMusicEnabled(next);
-                  if (next) ambientMusicPlayer.start(true, musicVolume);
-                  else ambientMusicPlayer.stop();
+                  try { localStorage.setItem('mlin_music_enabled', String(next)); } catch (err) {}
+                  if (next) {
+                    adventureMusicPlayer.start(true, musicVolume);
+                  } else {
+                    adventureMusicPlayer.stop();
+                  }
                 }}
               >
                 {musicEnabled ? t.on : t.off}
@@ -3139,11 +3071,22 @@ export default function App() {
                 max={100}
                 value={musicVolume}
                 disabled={!musicEnabled}
+                onInput={(e) => {
+                  const val = Number(e.currentTarget.value);
+                  setMusicVolume(val);
+                  try { localStorage.setItem('mlin_music_volume', String(val)); } catch (err) {}
+                  if (musicEnabled) {
+                    if (val <= 0) adventureMusicPlayer.stop();
+                    else adventureMusicPlayer.start(true, val);
+                  }
+                }}
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setMusicVolume(val);
+                  try { localStorage.setItem('mlin_music_volume', String(val)); } catch (err) {}
                   if (musicEnabled) {
-                    ambientMusicPlayer.start(true, val);
+                    if (val <= 0) adventureMusicPlayer.stop();
+                    else adventureMusicPlayer.start(true, val);
                   }
                 }}
                 style={{ width: '100%', accentColor: '#d4af37', cursor: musicEnabled ? 'pointer' : 'not-allowed' }}
@@ -3364,107 +3307,127 @@ export default function App() {
 
           {setupStep === 'PLAY' && (
             <>
-              <div className="status-bar" onClick={(e) => e.stopPropagation()}>
-                {Boolean(onlineGameId) && disconnectSeconds > 0 && !winner && !isDrawGame && (
-                  <div style={{
-                    background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', color: '#fca5a5',
-                    padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '8px'
-                  }}>
-                    {lang === 'hr'
-                      ? `⚠️ Prekinuta veza! Kazna za odustajanje za ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} bodova)`
-                      : `⚠️ Connection lost! Abandon penalty in ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} points)`}
-                  </div>
-                )}
-
-                {winner ? (
-                  <div className="status-turn" style={{ color: '#4ade80' }}>{t.gameOverWinner} {players[winner].name}!</div>
-                ) : isDrawGame ? (
-                  <div className="status-turn" style={{ color: '#facc15' }}>
-                    {lang === 'hr' ? '🤝 Partija je završila neriješeno (Remi — podjela bodova)!' : '🤝 Match ended in a Draw (Split points)!'}
-                  </div>
-                ) : (
-                  <>
-                    <div className="status-turn" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
-                      <span>
-                        {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
-                      </span>
-                      {bothAtThreePieces && (
-                        <span style={{
-                          padding: '2px 10px',
-                          borderRadius: '999px',
-                          fontSize: '0.85rem',
-                          fontWeight: 'bold',
-                          fontFamily: 'monospace',
-                          backgroundColor: remainingNoMillMoves <= 8 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(250, 204, 21, 0.16)',
-                          border: remainingNoMillMoves <= 8 ? '1px solid #ef4444' : '1px solid #facc15',
-                          color: remainingNoMillMoves <= 8 ? '#fca5a5' : '#fde047'
-                        }}>
-                          {lang === 'hr'
-                            ? `Bez mlina: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`
-                            : `No mill: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`}
-                        </span>
-                      )}
+              <div
+                className="status-bar"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  minHeight: '132px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  boxSizing: 'border-box',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
+                  {Boolean(onlineGameId) && disconnectSeconds > 0 && !winner && !isDrawGame && (
+                    <div style={{
+                      background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', color: '#fca5a5',
+                      padding: '4px 10px', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 'bold'
+                    }}>
+                      {lang === 'hr'
+                        ? `⚠️ Prekinuta veza! Kazna za odustajanje za ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} bodova)`
+                        : `⚠️ Connection lost! Abandon penalty in ${Math.max(0, OFFLINE_ABANDON_SECONDS - disconnectSeconds)}s (-${ABANDON_PENALTY_POINTS} points)`}
                     </div>
+                  )}
 
-                    {mustRemove && <div className="status-alert">{t.alertRemove}</div>}
-
-                    {drawNotice && !drawOfferBy && (
-                      <div style={{ color: '#fde047', fontSize: '0.8rem', fontWeight: 'bold', marginTop: '6px' }}>
-                        {drawNotice}
-                      </div>
-                    )}
-
-                    {drawOfferBy && (
-                      <div style={{
-                        marginTop: '8px', padding: '8px 12px', borderRadius: '8px',
-                        background: 'rgba(250, 204, 21, 0.14)', border: '1px solid #facc15',
-                        color: '#fef08a', fontSize: '0.82rem', display: 'flex', flexWrap: 'wrap',
-                        alignItems: 'center', justifyContent: 'center', gap: '8px'
-                      }}>
+                  {winner ? (
+                    <div className="status-turn" style={{ color: '#4ade80' }}>{t.gameOverWinner} {players[winner].name}!</div>
+                  ) : isDrawGame ? (
+                    <div className="status-turn" style={{ color: '#facc15' }}>
+                      {lang === 'hr' ? '🤝 Partija je završila neriješeno (Remi — podjela bodova)!' : '🤝 Match ended in a Draw (Split points)!'}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="status-turn" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
                         <span>
-                          {lang === 'hr'
-                            ? `🤝 ${players[drawOfferBy]?.name || drawOfferBy} nudi remi (podjela +${DRAW_SPLIT_POINTS} bodova).`
-                            : `🤝 ${players[drawOfferBy]?.name || drawOfferBy} offers a draw (+${DRAW_SPLIT_POINTS} points each).`}
+                          {t.turn} <span style={{ color: turn === 'WHITE' ? '#ffffff' : '#cbd5e1', textDecoration: 'underline' }}>{players[turn].name} ({turn === 'WHITE' ? t.whiteLabel : t.blackLabel})</span>
                         </span>
-                        {canRespondToDrawOffer ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleRespondDrawOffer(true)}
-                              style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 'bold', cursor: 'pointer' }}
-                            >
-                              {lang === 'hr' ? '✓ Prihvati' : '✓ Accept'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRespondDrawOffer(false)}
-                              style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 'bold', cursor: 'pointer' }}
-                            >
-                              {lang === 'hr' ? '✕ Odbij' : '✕ Decline'}
-                            </button>
-                          </>
-                        ) : (
-                          <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>
-                            {lang === 'hr' ? '⏳ Čekanje odgovora...' : '⏳ Waiting for response...'}
+                        {bothAtThreePieces && (
+                          <span style={{
+                            padding: '2px 10px',
+                            borderRadius: '999px',
+                            fontSize: '0.85rem',
+                            fontWeight: 'bold',
+                            fontFamily: 'monospace',
+                            backgroundColor: remainingNoMillMoves <= 8 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(250, 204, 21, 0.16)',
+                            border: remainingNoMillMoves <= 8 ? '1px solid #ef4444' : '1px solid #facc15',
+                            color: remainingNoMillMoves <= 8 ? '#fca5a5' : '#fde047'
+                          }}>
+                            {lang === 'hr'
+                              ? `Bez mlina: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`
+                              : `No mill: ${remainingNoMillMoves}/${MAX_NO_MILL_HALF_MOVES}`}
                           </span>
                         )}
                       </div>
-                    )}
 
-                    {gameCategory === 'COMPETITIVE' && (
-                      <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0' }}>
-                        <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{ padding: '6px 14px', borderRadius: '8px', background: turn === 'WHITE' ? '#1e293b' : '#0f172a', border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          ⚪ {players.WHITE.name}: {formatTime(timeLeft.WHITE)}
-                        </div>
-                        <div className={`timer-badge ${turn === 'BLACK' ? 'timer-active' : ''}`} style={{ padding: '6px 14px', borderRadius: '8px', background: turn === 'BLACK' ? '#1e293b' : '#0f172a', border: turn === 'BLACK' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.BLACK <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          ⚫ {players.BLACK.name}: {formatTime(timeLeft.BLACK)}
-                        </div>
+                      <div style={{ minHeight: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                        {mustRemove && (
+                          <div className="status-alert" style={{ marginTop: 0, lineHeight: '24px' }}>
+                            {t.alertRemove}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </>
-                )}
 
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      {drawNotice && !drawOfferBy && (
+                        <div style={{ color: '#fde047', fontSize: '0.78rem', fontWeight: 'bold' }}>
+                          {drawNotice}
+                        </div>
+                      )}
+
+                      {drawOfferBy && (
+                        <div style={{
+                          padding: '5px 10px', borderRadius: '8px',
+                          background: 'rgba(250, 204, 21, 0.14)', border: '1px solid #facc15',
+                          color: '#fef08a', fontSize: '0.8rem', display: 'flex', flexWrap: 'wrap',
+                          alignItems: 'center', justifyContent: 'center', gap: '8px'
+                        }}>
+                          <span>
+                            {lang === 'hr'
+                              ? `🤝 ${players[drawOfferBy]?.name || drawOfferBy} nudi remi (podjela +${DRAW_SPLIT_POINTS} bodova).`
+                              : `🤝 ${players[drawOfferBy]?.name || drawOfferBy} offers a draw (+${DRAW_SPLIT_POINTS} points each).`}
+                          </span>
+                          {canRespondToDrawOffer ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleRespondDrawOffer(true)}
+                                style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '3px 9px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                              >
+                                {lang === 'hr' ? '✓ Prihvati' : '✓ Accept'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRespondDrawOffer(false)}
+                                style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '3px 9px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                              >
+                                {lang === 'hr' ? '✕ Odbij' : '✕ Decline'}
+                              </button>
+                            </>
+                          ) : (
+                            <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>
+                              {lang === 'hr' ? '⏳ Čekanje odgovora...' : '⏳ Waiting for response...'}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {gameCategory === 'COMPETITIVE' && (
+                        <div className="timer-container" style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '4px 0' }}>
+                          <div className={`timer-badge ${turn === 'WHITE' ? 'timer-active' : ''}`} style={{ padding: '4px 12px', borderRadius: '8px', background: turn === 'WHITE' ? '#1e293b' : '#0f172a', border: turn === 'WHITE' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.WHITE <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                            ⚪ {players.WHITE.name}: {formatTime(timeLeft.WHITE)}
+                          </div>
+                          <div className={`timer-badge ${turn === 'BLACK' ? 'timer-active' : ''}`} style={{ padding: '4px 12px', borderRadius: '8px', background: turn === 'BLACK' ? '#1e293b' : '#0f172a', border: turn === 'BLACK' ? '2px solid #eab308' : '1px solid #334155', color: (timeLeft.BLACK <= 10) ? '#ef4444' : '#ffffff', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                            ⚫ {players.BLACK.name}: {formatTime(timeLeft.BLACK)}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '6px', flexWrap: 'wrap' }}>
                   {!winner && !isDrawGame && !drawOfferBy && bothAtThreePieces && (
                     <button
                       type="button"
@@ -3504,32 +3467,28 @@ export default function App() {
                 </div>
 
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
-                  <div className="rack-title">{p1Name}</div>
-                  {(() => {
-                    const p1Stats = getStatsForSide(p1Color, p1Name);
-                    const titleText = getPlayerTitle(p1Stats.wins, p1Stats.losses, lang);
-                    const tierClass = getPlayerTitleTierClass(p1Stats.wins, p1Stats.losses);
+                  <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                    <div className="rack-title">{p1Name}</div>
+                    {(() => {
+                      const p1Stats = getStatsForSide(p1Color, p1Name);
+                      const titleText = getPlayerTitle(p1Stats.wins, p1Stats.losses, lang);
+                      const tierClass = getPlayerTitleTierClass(p1Stats.wins, p1Stats.losses);
 
-                    return (
-                      <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', marginBottom: '8px' }}>
-                        <span>{titleText}</span>
-                      </div>
-                    );
-                  })()}
+                      return (
+                        <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', maxWidth: '100%' }}>
+                          {titleText}
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p1Color];
-                      const isLastMovePiece = isPieceAvailable && lastMove[p1Color]?.to === i;
                       const canInteract = !mustRemove && turn === p1Color && isPieceAvailable && (!isAIMode || aiColor !== p1Color) && (!onlineGameId || isAIMode || turn === myColor);
                       return (
                         <div
                           key={`p1-slot-${i}`}
                           className={`piece-slot ${p1Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
-                          style={isLastMovePiece ? {
-                            outline: '2px solid #38bdf8',
-                            outlineOffset: '2px',
-                            boxShadow: '0 0 10px rgba(56, 189, 248, 0.85)'
-                          } : undefined}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
@@ -3543,13 +3502,15 @@ export default function App() {
                     })}
                   </div>
                   <div style={{
-                    marginTop: '8px', padding: '5px 7px', borderRadius: '7px',
+                    padding: '5px 7px', borderRadius: '7px',
                     background: 'rgba(15, 23, 42, 0.75)', border: '1px solid #334155',
-                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center'
+                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center', height: '28px', width: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                    overflow: 'hidden', boxSizing: 'border-box', minWidth: 0
                   }}>
-                    <span style={{ color: '#94a3b8' }}>{lang === 'hr' ? 'Zadnji potez:' : 'Last move:'} </span>
-                    <strong style={{ color: '#38bdf8' }}>
-                      {lastMove[p1Color]?.text || (lang === 'hr' ? '—' : '—')}
+                    <span style={{ color: '#94a3b8', flexShrink: 0 }}>{lang === 'hr' ? 'Zadnji:' : 'Last:'}</span>
+                    <strong style={{ color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                      {lastMove[p1Color]?.text || '—'}
                     </strong>
                   </div>
                 </div>
@@ -3557,7 +3518,7 @@ export default function App() {
                 <Board
                   board={board} selectedNode={currentActiveNode} validMoves={validMoves} removableNodes={removableNodes} mustRemove={mustRemove}
                   turn={turn} isAIMode={isAIMode} aiColor={aiColor} focusedNode={keyboardFocusNode}
-                  theme={activeBoardTheme}
+                  theme={activeBoardTheme} lastMove={lastMove}
                   onCancelSelection={handleCancelSelection}
                   onNodeInteract={(targetIdx) => {
                     if (onlineGameId && !isAIMode && turn !== myColor) return;
@@ -3577,32 +3538,28 @@ export default function App() {
                 />
 
                 <div className="side-rack" onClick={(e) => e.stopPropagation()}>
-                  <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
-                  {(() => {
-                    const p2Stats = getStatsForSide(p2Color, p2Name);
-                    const titleText = getPlayerTitle(p2Stats.wins, p2Stats.losses, lang);
-                    const tierClass = getPlayerTitleTierClass(p2Stats.wins, p2Stats.losses);
+                  <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                    <div className="rack-title" style={{ color: '#cbd5e1' }}>{p2Name}</div>
+                    {(() => {
+                      const p2Stats = getStatsForSide(p2Color, p2Name);
+                      const titleText = getPlayerTitle(p2Stats.wins, p2Stats.losses, lang);
+                      const tierClass = getPlayerTitleTierClass(p2Stats.wins, p2Stats.losses);
 
-                    return (
-                      <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', marginBottom: '8px' }}>
-                        <span>{titleText}</span>
-                      </div>
-                    );
-                  })()}
+                      return (
+                        <div className={`custom-title-frame ${tierClass}`} style={{ fontSize: '0.66rem', padding: '3px 8px', maxWidth: '100%' }}>
+                          {titleText}
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <div className="rack-pieces">
                     {Array.from({ length: 9 }).map((_, i) => {
                       const isPieceAvailable = i < unplaced[p2Color];
-                      const isLastMovePiece = isPieceAvailable && lastMove[p2Color]?.to === i;
                       const canInteract = !mustRemove && turn === p2Color && isPieceAvailable && (!isAIMode || aiColor !== p2Color) && (!onlineGameId || isAIMode || turn === myColor);
                       return (
                         <div
                           key={`p2-slot-${i}`}
                           className={`piece-slot ${p2Color === 'WHITE' ? 'piece-white' : 'piece-black'} ${isPieceAvailable ? (canInteract ? 'draggable' : '') : 'disabled'}`}
-                          style={isLastMovePiece ? {
-                            outline: '2px solid #fbbf24',
-                            outlineOffset: '2px',
-                            boxShadow: '0 0 10px rgba(251, 191, 36, 0.85)'
-                          } : undefined}
                           onMouseDown={(e) => {
                             if (!canInteract) return;
                             e.stopPropagation();
@@ -3616,13 +3573,15 @@ export default function App() {
                     })}
                   </div>
                   <div style={{
-                    marginTop: '8px', padding: '5px 7px', borderRadius: '7px',
+                    padding: '5px 7px', borderRadius: '7px',
                     background: 'rgba(15, 23, 42, 0.75)', border: '1px solid #334155',
-                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center'
+                    fontSize: '0.68rem', color: '#cbd5e1', textAlign: 'center', height: '28px', width: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                    overflow: 'hidden', boxSizing: 'border-box', minWidth: 0
                   }}>
-                    <span style={{ color: '#94a3b8' }}>{lang === 'hr' ? 'Zadnji potez:' : 'Last move:'} </span>
-                    <strong style={{ color: '#fbbf24' }}>
-                      {lastMove[p2Color]?.text || (lang === 'hr' ? '—' : '—')}
+                    <span style={{ color: '#94a3b8', flexShrink: 0 }}>{lang === 'hr' ? 'Zadnji:' : 'Last:'}</span>
+                    <strong style={{ color: '#fbbf24', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                      {lastMove[p2Color]?.text || '—'}
                     </strong>
                   </div>
                 </div>

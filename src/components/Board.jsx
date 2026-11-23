@@ -16,19 +16,20 @@ export const NODE_POSITIONS = [
   { x: 36.66, y: 63.33 }, { x: 36.66, y: 50 }
 ];
 
-export default function Board({ 
-  board, 
+export default function Board({
+  board,
   onNodeInteract,
   onNodePick,
-  selectedNode, 
-  validMoves = [], 
+  selectedNode,
+  validMoves = [],
   removableNodes = [],
   turn,
   isAIMode,
   aiColor,
   mustRemove,
   focusedNode,
-  theme // Primamo temu odabrane ploče
+  theme, // Primamo temu odabrane ploče
+  lastMove // Zadnji potez po boji { WHITE, BLACK }
 }) {
   const isAITurn = isAIMode && turn === aiColor;
   const boardRef = useRef(null);
@@ -66,13 +67,13 @@ export default function Board({
   };
 
   return (
-    <div 
-      className="board-wrapper" 
+    <div
+      className="board-wrapper"
       ref={boardRef}
       onMouseUp={handleBoardMouseUp}
     >
-      <svg 
-        className="board-svg" 
+      <svg
+        className="board-svg"
         viewBox="0 0 100 100"
         style={boardBgColor ? { backgroundColor: boardBgColor, borderRadius: '10px' } : {}}
       >
@@ -105,9 +106,25 @@ export default function Board({
         const isValidTarget = validMoves.includes(idx);
         const isRemovable = removableNodes.includes(idx);
         const isKeyboardFocused = focusedNode === idx;
-        
+
         const canPickPiece = piece === turn && !isAITurn && !mustRemove;
         const inMill = piece ? isPieceInMill(board, idx, piece) : false;
+
+        const isWhiteLastPiece =
+          piece === 'WHITE' &&
+          lastMove?.WHITE &&
+          lastMove.WHITE.type !== 'REMOVE' &&
+          lastMove.WHITE.to === idx;
+
+        const isBlackLastPiece =
+          piece === 'BLACK' &&
+          lastMove?.BLACK &&
+          lastMove.BLACK.type !== 'REMOVE' &&
+          lastMove.BLACK.to === idx;
+
+        const lastMoveDotColor = isWhiteLastPiece
+          ? '#0284c7'
+          : (isBlackLastPiece ? '#fbbf24' : null);
 
         return (
           <div
@@ -126,9 +143,12 @@ export default function Board({
             {piece && (
               <div
                 className={`piece-slot ${piece === 'WHITE' ? 'piece-white' : 'piece-black'} ${isSelected ? 'selected-piece' : ''} ${inMill ? 'in-mill-piece' : ''} ${isRemovable ? 'pulse-remove' : ''} ${canPickPiece || isRemovable ? 'draggable' : ''}`}
-                style={theme?.whitePiece && theme?.blackPiece ? {
-                  background: piece === 'WHITE' ? theme.whitePiece : theme.blackPiece
-                } : {}}
+                style={{
+                  position: 'relative',
+                  ...(theme?.whitePiece && theme?.blackPiece
+                    ? { background: piece === 'WHITE' ? theme.whitePiece : theme.blackPiece }
+                    : {})
+                }}
                 onMouseDown={(e) => {
                   if (isAITurn) return;
                   e.stopPropagation();
@@ -136,7 +156,28 @@ export default function Board({
                     onNodePick(idx);
                   }
                 }}
-              />
+              >
+                {lastMoveDotColor && (
+                  <span
+                    className="last-move-center-dot"
+                    title={piece === 'WHITE' ? lastMove?.WHITE?.text : lastMove?.BLACK?.text}
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      width: '9px',
+                      height: '9px',
+                      borderRadius: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      backgroundColor: lastMoveDotColor,
+                      border: piece === 'WHITE' ? '1.5px solid #ffffff' : '1.5px solid #0f172a',
+                      boxShadow: `0 0 6px ${lastMoveDotColor}`,
+                      pointerEvents: 'none',
+                      zIndex: 3
+                    }}
+                  />
+                )}
+              </div>
             )}
           </div>
         );
